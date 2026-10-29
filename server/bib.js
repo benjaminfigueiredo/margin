@@ -191,6 +191,13 @@ export function formatEntry({ type, key, fields }) {
 const MONTHS = new Set(['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec']);
 const value = (name, v) => (name === 'month' && MONTHS.has(v.toLowerCase()) ? v.toLowerCase() : `{${v}}`);
 
+// Every key defined in the .bib files the manuscript uses.
+export function bibKeys(project) {
+  const keys = new Map(); // key -> file
+  for (const b of citations(project).bibs) for (const e of parseBib(project.read(b))) if (!keys.has(e.key)) keys.set(e.key, b);
+  return keys;
+}
+
 export function addEntry(project, bibtex, file) {
   const [entry] = parseBib(bibtex);
   if (!entry || !entry.key) throw new Error('Could not parse a BibTeX entry from the input');

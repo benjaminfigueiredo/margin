@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- New Claude tools `search_zotero` and `cite_from_zotero`: search the Zotero
+  library open on this Mac and copy single entries into the paper's `.bib` under
+  their Better BibTeX citation keys. Works with group libraries; falls back to
+  Zotero's local API when Better BibTeX isn't installed. Local file paths,
+  abstracts, notes and keywords are left out so they don't reach Overleaf.
 - Fix: bibliography entries added by Claude wrote `month = {sep}`, which BibTeX
   prints literally; month macros now stay bare (`month = sep`).
 - Fix: PDF → source (double-click) failed when the paper folder's path went

@@ -132,7 +132,83 @@ console.log(r.text); assert.ok(!r.error);
 r = await call('add_bib_entry', { bibtex: '@article{other, title={dup}, doi={10.1093/PLANKT/fbab000}}' });
 console.log(r.text); assert.ok(r.error);
 
+// Zotero tools against a fake Zotero (Better BibTeX JSON-RPC, then the local API
+// fallback). Only when the test server runs in-process, so it sees the env var.
+if (running) {
+  const zot = await fakeZotero();
+  process.env.MARGIN_ZOTERO_URL = zot.url;
+
+  step('search_zotero via Better BibTeX (words in any order)');
+  r = await call('search_zotero', { query: 'copepod heatwave' });
+  console.log(r.text);
+  assert.match(r.text, /leeHeatwaveCopepod2022/);
+  assert.match(r.text, /library: Lab group/);
+
+  step('cite_from_zotero: group library found, local fields dropped, duplicate refused');
+  r = await call('cite_from_zotero', { key: 'leeHeatwaveCopepod2022' });
+  console.log(r.text); assert.ok(!r.error);
+  const bib = fs.readFileSync(path.join(tmp, 'paper', 'refs.bib'), 'utf8');
+  assert.match(bib, /@article\{leeHeatwaveCopepod2022,/);
+  assert.match(bib, /^  month\s*= jul,?$/m);
+  assert.doesNotMatch(bib, /Zotero\/storage|abstract/);
+  r = await call('search_zotero', { query: 'heatwave' });
+  assert.match(r.text, /already in refs\.bib/);
+  r = await call('cite_from_zotero', { key: 'leeHeatwaveCopepod2022' });
+  console.log(r.text); assert.ok(r.error);
+  r = await call('cite_from_zotero', { key: 'nosuchkey' });
+  console.log(r.text); assert.ok(r.error); assert.match(r.text, /search_zotero/);
+
+  step('Zotero local API fallback (no Better BibTeX)');
+  zot.mode = 'local';
+  r = await call('search_zotero', { query: 'grazing' });
+  console.log(r.text); assert.match(r.text, /kimGrazing2020/);
+  r = await call('cite_from_zotero', { key: 'kimGrazing2020' });
+  console.log(r.text); assert.ok(!r.error); assert.match(r.text, /\\cite\{kimGrazing2020\}/);
+
+  step('Zotero not running');
+  await zot.close();
+  r = await call('search_zotero', { query: 'anything' });
+  console.log(r.text); assert.ok(r.error); assert.match(r.text, /Zotero is not running/);
+}
+
 console.log('\nAll checks passed.');
 await client.close();
 if (running) { await running.close(); fs.rmSync(tmp, { recursive: true, force: true }); }
 process.exit(0);
+
+// Minimal stand-in for Zotero on 23119: Better BibTeX's item.search/item.export
+// (mode 'bbt'), or only Zotero's local API with BBT absent (mode 'local').
+async function fakeZotero() {
+  const http = await import('node:http');
+  const items = [
+    { id: 'http://zotero.org/groups/1/items/AAAA1111', library: 'Lab group', citekey: 'leeHeatwaveCopepod2022', title: 'Marine heatwave effects on copepod fecundity', author: [{ family: 'Lee', given: 'A.' }], issued: { 'date-parts': [[2022]] }, 'container-title': 'Limnol. Oceanogr.', DOI: '10.1002/lno.99999',
+      bib: '@article{leeHeatwaveCopepod2022,\n  title = {Marine Heatwave Effects on Copepod Fecundity},\n  author = {Lee, A.},\n  year = 2022,\n  month = jul,\n  journal = {Limnol. Oceanogr.},\n  doi = {10.1002/lno.99999},\n  abstract = {Long text.},\n  file = {/Users/someone/Zotero/storage/X/Lee.pdf}\n}\n' },
+  ];
+  const localItem = { key: 'BBBB2222', data: { key: 'BBBB2222', itemType: 'journalArticle', title: 'Grazing by copepods', creators: [{ creatorType: 'author', firstName: 'B.', lastName: 'Kim' }], date: '2020', extra: 'Citation Key: kimGrazing2020' } };
+  const state = { mode: 'bbt' };
+  const srv = http.createServer(async (req, res) => {
+    let body = ''; for await (const c of req) body += c;
+    const send = (status, data, type = 'application/json') => { res.writeHead(status, { 'Content-Type': type }); res.end(typeof data === 'string' ? data : JSON.stringify(data)); };
+    const url = new URL(req.url, 'http://x');
+    if (url.pathname === '/better-bibtex/json-rpc') {
+      if (state.mode !== 'bbt') return send(404, 'No endpoint found', 'text/plain');
+      const { method, params } = JSON.parse(body);
+      if (method === 'item.search') {
+        const q = params[0].toLowerCase(); // phrase match, like BBT
+        return send(200, { jsonrpc: '2.0', id: 1, result: items.filter((i) => `${i.title} ${i.citekey}`.toLowerCase().includes(q)).map(({ bib, ...csl }) => csl) });
+      }
+      const it = items.find((i) => i.citekey === params[0][0] && i.library === (params[2] || 'My Library'));
+      return send(200, it ? { jsonrpc: '2.0', id: 1, result: it.bib } : { jsonrpc: '2.0', id: null, error: { code: -32602, message: `not found: ${params[0][0]}` } });
+    }
+    if (url.pathname.startsWith('/api/users/0/items')) {
+      if (url.pathname.endsWith('/BBBB2222')) {
+        if (url.searchParams.get('format') === 'bibtex') return send(200, '@article{kim_grazing_2020,\n\ttitle = {Grazing by copepods},\n\tauthor = {Kim, B.},\n\tyear = {2020}\n}\n', 'text/plain');
+        return send(200, localItem);
+      }
+      return send(200, url.searchParams.get('q')?.match(/grazing|kimGrazing2020/i) ? [localItem] : []);
+    }
+    send(404, 'No endpoint found', 'text/plain');
+  });
+  await new Promise((ok) => srv.listen(0, '127.0.0.1', ok));
+  return Object.assign(state, { url: `http://127.0.0.1:${srv.address().port}`, close: () => new Promise((ok) => srv.close(ok)) });
+}

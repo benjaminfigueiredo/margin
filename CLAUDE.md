@@ -14,6 +14,7 @@ server/mcp.js       MCP tool definitions (what Claude can do in a paper session)
 server/review.js    Suggestion/comment store (.review/review.json) and quote-based anchoring
 server/compile.js   latexmk invocation, TeX log parser, SyncTeX forward/inverse
 server/bib.js       BibTeX parser, citation checks, doi.org and Crossref lookups
+server/zotero.js    Zotero search/export via Better BibTeX JSON-RPC (local API fallback), port 23119
 server/git.js       commit / pull --rebase / push for the Overleaf round-trip
 server/project.js   Path safety (all client paths go through Project.abs), file tree
 server/init.js      `margin init`: .mcp.json, .claude/ files, .git/info/exclude

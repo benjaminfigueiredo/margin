@@ -97,6 +97,7 @@ Things to say to Claude:
 - `/fix-compile`
 - "Look at my selection — is this claim supported by the results section?"
 - "Add Smith et al. 2021 on copepod heat stress to the bibliography and cite it here"
+- "Cite my Zotero paper on heatwaves and copepod fecundity here"
 
 In the editor:
 
@@ -124,10 +125,23 @@ before starting a session to pull co-authors' edits.
 | `show_location` | Scroll your editor and PDF to a spot |
 | `check_citations` | Missing / unused / duplicate keys and DOIs |
 | `search_references`, `add_bib_entry` | Crossref search; add BibTeX by DOI (deduplicated) |
+| `search_zotero`, `cite_from_zotero` | Search your Zotero library; copy one entry into the .bib by its citation key |
 | `list_files`, `read_file` | Project files |
 
 Claude Code's own file tools still work for direct edits; the editor reloads
 when a file changes on disk.
+
+### Zotero
+
+If you keep your references in Zotero, Claude can search your library and copy
+just the entries you cite into the paper's `.bib`. Zotero stays your master
+library, and the `.bib` on Overleaf holds only what the paper uses. Zotero must
+be open during the session. Install the
+[Better BibTeX](https://retorque.re/zotero-better-bibtex/) add-on (recommended:
+its citation keys are used, and group libraries are searched too). Without it,
+Margin falls back to Zotero's own local API (Settings → Advanced → "Allow other
+applications on this computer to communicate with Zotero"), which only covers
+My Library. Local file paths, abstracts, notes and keywords are not copied.
 
 ## How it works
 
@@ -211,6 +225,7 @@ server/mcp.js       Claude's tools (MCP over HTTP at /mcp)
 server/review.js    suggestion/comment store and text anchoring
 server/compile.js   latexmk, log parsing, SyncTeX
 server/bib.js       BibTeX parsing, citation checks, DOI/Crossref
+server/zotero.js    Zotero library search and export (Better BibTeX / local API)
 server/git.js       commit / pull --rebase / push
 server/init.js      margin init
 templates/          CLAUDE.md and slash commands installed by init

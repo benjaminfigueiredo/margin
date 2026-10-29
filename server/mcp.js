@@ -3,7 +3,8 @@
 // browser UI share one review store, one compile, and one view of the selection.
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { checkCitations, lookupDoi, addEntry, searchCrossref, parseBib, formatEntry } from './bib.js';
+import { checkCitations, lookupDoi, addEntry, searchCrossref, parseBib, formatEntry, bibKeys } from './bib.js';
+import { searchZotero, exportFromZotero } from './zotero.js';
 
 const text = (t) => ({ content: [{ type: 'text', text: t }] });
 const fail = (e) => ({ isError: true, content: [{ type: 'text', text: e instanceof Error ? e.message : String(e) }] });
@@ -222,6 +223,35 @@ export function buildMcpServer(ctx) {
   }, wrap(async ({ doi, bibtex, key, file }) => {
     if (!doi && !bibtex) throw new Error('Give either doi or bibtex');
     const entry = doi ? await lookupDoi(doi, { key }) : bibtex;
+    const r = addEntry(project, entry, file);
+    return text(`Added \\cite{${r.key}} to ${r.file}:\n\n${formatEntry(parseBib(entry)[0])}`);
+  }));
+
+  server.registerTool('search_zotero', {
+    title: 'Search the author\'s Zotero library',
+    description: 'Search the author\'s Zotero library (Zotero must be open on this computer) by title, author, year or DOI words. Returns citation keys; entries already in the manuscript\'s .bib are marked. Prefer this over search_references for papers the author already has.',
+    inputSchema: { query: z.string(), limit: z.number().int().min(1).max(50).optional().describe('Default 10') },
+  }, wrap(async ({ query, limit }) => {
+    const { via, items } = await searchZotero(query, limit || 10);
+    if (!items.length) return text(`No matches in Zotero (searched via ${via}).`);
+    const have = bibKeys(project);
+    const lines = items.map((h, i) => {
+      const where = [h.library && h.library !== 'My Library' ? `library: ${h.library}` : '', h.doi ? `doi: ${h.doi}` : '', have.has(h.key) ? `already in ${have.get(h.key)}` : ''].filter(Boolean).join(' · ');
+      return `${i + 1}. ${h.key} — ${h.title} — ${h.authors || 'no authors'} (${h.year ?? 'n.d.'})${h.venue ? ' · ' + h.venue : ''}${where ? '\n   ' + where : ''}`;
+    });
+    return text(lines.join('\n'));
+  }));
+
+  server.registerTool('cite_from_zotero', {
+    title: 'Copy a Zotero entry into the bibliography',
+    description: 'Copy one entry from the author\'s Zotero library into the manuscript\'s .bib under its Zotero citation key (local fields such as file paths and abstracts are dropped). Refuses duplicate keys and duplicate DOIs. Returns the key to cite. Does not edit the .tex.',
+    inputSchema: {
+      key: z.string().describe('Citation key from search_zotero'),
+      library: z.string().optional().describe('Zotero library name from search_zotero, if not My Library (found automatically when omitted)'),
+      file: z.string().optional().describe('Target .bib (default: the first one the manuscript uses)'),
+    },
+  }, wrap(async ({ key, library, file }) => {
+    const entry = await exportFromZotero(key, library);
     const r = addEntry(project, entry, file);
     return text(`Added \\cite{${r.key}} to ${r.file}:\n\n${formatEntry(parseBib(entry)[0])}`);
   }));

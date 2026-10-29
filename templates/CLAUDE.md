@@ -36,7 +36,10 @@ and sees everything you do through the `margin` MCP tools.
 ## Bibliography
 
 - Use `check_citations` to find missing, unused and duplicate entries.
-- Add references with `add_bib_entry` (by DOI when possible). Use
+- If the author uses Zotero, look there first: `search_zotero`, then
+  `cite_from_zotero` with the key it returns (Zotero must be open; if it isn't,
+  ask the author to open it rather than falling back silently).
+- Otherwise add references with `add_bib_entry` (by DOI when possible). Use
   `search_references` to find a DOI, and confirm with the author before citing
   a paper they haven't named.
 - Never invent references or DOIs.
