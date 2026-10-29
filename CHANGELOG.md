@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Fix: bibliography entries added by Claude wrote `month = {sep}`, which BibTeX
+  prints literally; month macros now stay bare (`month = sep`).
 - Fix: PDF → source (double-click) failed when the paper folder's path went
   through a symlink (e.g. macOS `/var` → `/private/var`).
 

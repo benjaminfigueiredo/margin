@@ -175,7 +175,7 @@ function ascii(s) {
   return s.normalize('NFKD').replace(/[̀-ͯ]/g, '').replace(/\\[`'^"~=.uvHtcdbk]\{?(\w)\}?/g, '$1').replace(/[^A-Za-z0-9]/g, '');
 }
 
-const FIELD_ORDER = ['author', 'title', 'journal', 'booktitle', 'year', 'volume', 'number', 'pages', 'publisher', 'doi'];
+const FIELD_ORDER = ['author', 'title', 'journal', 'booktitle', 'year', 'month', 'volume', 'number', 'pages', 'publisher', 'doi'];
 
 export function formatEntry({ type, key, fields }) {
   const names = Object.keys(fields).sort((a, b) => {
@@ -183,9 +183,13 @@ export function formatEntry({ type, key, fields }) {
     return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib) || a.localeCompare(b);
   });
   const width = Math.max(...names.map((n) => n.length), 0);
-  const body = names.map((n) => `  ${n.padEnd(width)} = {${fields[n]}}`).join(',\n');
+  const body = names.map((n) => `  ${n.padEnd(width)} = ${value(n, fields[n])}`).join(',\n');
   return `@${type}{${key},\n${body}\n}`;
 }
+
+// Month macros (month = sep) must stay bare: BibTeX prints {sep} literally.
+const MONTHS = new Set(['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec']);
+const value = (name, v) => (name === 'month' && MONTHS.has(v.toLowerCase()) ? v.toLowerCase() : `{${v}}`);
 
 export function addEntry(project, bibtex, file) {
   const [entry] = parseBib(bibtex);
