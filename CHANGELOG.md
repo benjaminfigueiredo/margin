@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.2.0 — 2026-10-29
+
 - Fix: on a branch that tracks nothing on Overleaf, the status bar showed no "to pull" count,
   which looked exactly like being up to date. It now says "not tracking Overleaf", and the
   tooltip explains how to get back to `master`.
