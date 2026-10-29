@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Dark theme. Margin follows your system's light/dark setting; **Aa** in the top bar
+  forces Light or Dark and sets the editor font size. Both are saved in this browser, not
+  in the paper. The editor's syntax colours, suggestion and comment highlights, review
+  cards and compile log all switch with the theme; the PDF pages stay white.
+
 ## 0.2.0 — 2026-10-29
 
 - Fix: on a branch that tracks nothing on Overleaf, the status bar showed no "to pull" count,

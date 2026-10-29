@@ -4,6 +4,7 @@ import { createPdfView } from './pdfview.js';
 import { createReviewPanel } from './review.js';
 import { initWordCount } from './wordcount.js';
 import { createOutline } from './outline.js';
+import { initSettings } from './settings.js';
 
 const state = {
   project: null,
@@ -30,6 +31,7 @@ const editor = createEditor($('#editor'), {
 });
 
 initWordCount(editor);
+initSettings(editor);
 
 // ---------- outline ----------
 const outline = createOutline($('#outline'), {
