@@ -481,3 +481,83 @@ details summary { cursor: pointer; color: var(--ink-2); margin: 8px 0 4px; }
 @media (max-width: 1100px) { .review-pane.response-mode { width: 330px; } }
 .resp-export { display: inline-flex; align-items: center; gap: 0; }
 .resp-export .fine { margin-right: 2px; }
+/* ---------- Ask Claude (web/src/ask.js) ---------- */
+#settings-menu { width: 280px; }
+/* The editor header now holds three buttons. Keep a narrow editor pane from widening the page
+   (the body grid's column would otherwise grow to the header's min-content width). */
+body { grid-template-columns: minmax(0, 1fr); }
+.editor-head { overflow: hidden; }
+.editor-head .current-file { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.editor-head .btn, .editor-head .save-state { flex: none; }
+.editor-pane { container-type: inline-size; }
+@container (max-width: 400px) {
+  .editor-head { gap: 3px; padding: 0 6px; }
+  .editor-head .btn.sm { padding: 2px 5px; }
+}
+.btn.ask { color: var(--ink); border-color: var(--claude); background: var(--claude-soft); font-weight: 600; }
+.btn.ask:hover:not(:disabled) { background: var(--claude); color: var(--seg-on-ink); }
+.btn.claude { background: var(--claude); border-color: var(--claude); color: var(--seg-on-ink); font-weight: 600; }
+.btn.claude:hover { filter: brightness(1.08); }
+.ask-box { margin: 10px 10px 0; padding: 10px; background: var(--paper); border: 1px solid var(--line); border-left: 3px solid var(--claude); border-radius: 8px; display: grid; gap: 8px; }
+.ask-head { display: flex; align-items: center; gap: 8px; }
+.ask-head .fine { margin-left: auto; }
+.ask-starters { display: flex; flex-wrap: wrap; gap: 4px; }
+.ask-starters button { border: 1px solid var(--line-strong); background: var(--panel); color: var(--ink-2); border-radius: 10px; padding: 1px 8px; font-size: 11.5px; cursor: pointer; }
+.ask-starters button:hover { border-color: var(--claude); color: var(--claude); }
+.card:has(> .ask-state), .card:has(> .ask-extra) { border-left-color: var(--claude); }
+.ask-extra { display: grid; gap: 6px; }
+.ask-state { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 11.5px; color: var(--ink-2); }
+.ask-state .ask-label { font-weight: 600; }
+.ask-state .ask-hint { color: var(--muted); }
+.ask-state .btn.sm { padding: 1px 6px; font-size: 11px; }
+.ask-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; display: inline-block; }
+.ask-state.waiting .ask-dot { background: var(--warn); }
+.ask-state.waiting .ask-label { color: var(--warn); }
+.ask-state.picked-up .ask-dot { background: var(--claude); animation: ask-pulse 1.4s ease-in-out infinite; }
+.ask-state.picked-up .ask-label { color: var(--claude); }
+.ask-state.answered .ask-dot { background: var(--accent); }
+.ask-state.answered .ask-label { color: var(--accent-ink); }
+@keyframes ask-pulse { 50% { opacity: .35; } }
+.ask-links { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.ask-link { border: 1px solid var(--line-strong); background: var(--gutter); color: var(--ink-2); border-radius: 4px; padding: 1px 6px; font-size: 11px; cursor: pointer; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ask-link:hover { border-color: var(--claude); color: var(--ink); }
+.cm-comment.ask { background: var(--claude-soft); border-bottom-color: var(--claude); }
+.cm-comment.ask.active { outline: 2px solid var(--claude); outline-offset: 1px; }
+.claude-status { font: inherit; color: var(--ink-2); background: none; border: 0; padding: 2px 6px; border-radius: 4px; display: inline-flex; align-items: center; gap: 6px; cursor: default; white-space: nowrap; }
+.claude-status.on .ask-dot { background: var(--claude); }
+.claude-status.idle .ask-dot { background: var(--muted); }
+.claude-status.off { color: var(--muted); }
+.claude-status.off .ask-dot { background: transparent; border: 1px solid var(--muted); }
+.claude-status strong { color: var(--warn); cursor: pointer; }
+
+/* ---------- split-screen layout (short window above a Claude terminal; web/src/settings.js) ----------
+   Same panes as the standard layout, with denser chrome so the editor, the review cards
+   and the PDF keep most of a 450-650 px window, and nothing opens below the fold. */
+:root[data-layout="split"] body { grid-template-rows: 34px 1fr 24px; }
+:root[data-layout="split"] .topbar { padding: 0 8px; gap: 10px; }
+:root[data-layout="split"] .brand { font-size: 13px; gap: 6px; }
+:root[data-layout="split"] .logo { width: 20px; height: 20px; font-size: 11px; border-radius: 5px; }
+:root[data-layout="split"] .top-actions { gap: 4px; }
+:root[data-layout="split"] .btn.top, :root[data-layout="split"] .btn.compile { padding: 3px 9px; }
+:root[data-layout="split"] .btn.compile.caret { padding: 3px 6px; }
+:root[data-layout="split"] .pane-head { height: 28px; padding: 0 8px; }
+:root[data-layout="split"] .files { width: 170px; }
+:root[data-layout="split"] .review-pane { width: 270px; }
+:root[data-layout="split"] .logs { inset: 28px 0 0 0; }
+:root[data-layout="split"] .tree { padding: 3px 0; min-height: 44px; }
+:root[data-layout="split"] .tree-item { height: 22px; }
+:root[data-layout="split"] .outline { min-height: 28px; max-height: 40%; }
+:root[data-layout="split"] .outline-item { height: 21px; }
+:root[data-layout="split"] .review-sub { padding: 3px 8px; }
+:root[data-layout="split"] .cards { padding: 6px; gap: 6px; }
+:root[data-layout="split"] .card { padding: 7px 8px; gap: 5px; }
+:root[data-layout="split"] .quote { max-height: 60px; }
+:root[data-layout="split"] .diff { max-height: 120px; }
+:root[data-layout="split"] .new-comment, :root[data-layout="split"] .ask-box { margin: 6px 6px 0; padding: 7px 8px; gap: 5px; }
+:root[data-layout="split"] .ask-box .quote.small, :root[data-layout="split"] .new-comment .quote.small { max-height: 38px; }
+:root[data-layout="split"] .ask-box textarea, :root[data-layout="split"] .new-comment textarea { min-height: 40px; }
+:root[data-layout="split"] .pdf-pages { padding: 8px; gap: 8px; }
+:root[data-layout="split"] .popover { max-height: calc(100vh - 44px); overflow: auto; gap: 8px; padding: 10px; }
+:root[data-layout="split"] .wc-panel { bottom: 30px; max-height: calc(100vh - 74px); }
+:root[data-layout="split"] .toasts { bottom: 30px; }
+:root[data-layout="split"] .banner { padding: 3px 8px; }

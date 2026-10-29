@@ -9,6 +9,11 @@ import { execFileSync } from 'node:child_process';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const TEMPLATES = path.join(here, '..', 'templates');
 const LOCAL_ONLY = ['.review/', '.margin-build/', '.claude/', '.mcp.json', '.DS_Store'];
+// "Ask Claude" prompt hook (see server/asks.js). Lives under .claude/, so LOCAL_ONLY and
+// IGNORED already cover it. The command is shell form so it works on every Claude Code version
+// that has hooks; CLAUDE_PROJECT_DIR is set by Claude Code to the paper folder.
+export const ASK_HOOK_FILE = path.join('.claude', 'hooks', 'margin-asks.mjs');
+export const ASK_HOOK_COMMAND = 'node "$CLAUDE_PROJECT_DIR/.claude/hooks/margin-asks.mjs"';
 
 export function init(dir, { port = 4242, log = console.log } = {}) {
   if (!fs.existsSync(dir)) throw new Error(`No such folder: ${dir}`);
@@ -36,9 +41,24 @@ export function init(dir, { port = 4242, log = console.log } = {}) {
   settings.enabledMcpjsonServers = [...new Set([...(settings.enabledMcpjsonServers || []), 'margin'])];
   settings.permissions = settings.permissions || {};
   settings.permissions.allow = [...new Set([...(settings.permissions.allow || []), 'mcp__margin__*'])];
+  // The author's own hooks are kept; ours is added once (matched by script name).
+  settings.hooks = settings.hooks && typeof settings.hooks === 'object' ? settings.hooks : {};
+  const onPrompt = Array.isArray(settings.hooks.UserPromptSubmit) ? settings.hooks.UserPromptSubmit : [];
+  if (!JSON.stringify(onPrompt).includes('margin-asks.mjs')) onPrompt.push({ hooks: [{ type: 'command', command: ASK_HOOK_COMMAND, timeout: 5 }] });
+  settings.hooks.UserPromptSubmit = onPrompt;
   fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
   fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n');
-  done.push('.claude/settings.local.json: approved the margin MCP server and its tools');
+  done.push('.claude/settings.local.json: approved the margin MCP server and its tools, and added the "Ask Claude" prompt hook');
+
+  // Margin's own script, not something the author edits: refreshed when Margin's copy changes.
+  const hookPath = path.join(dir, ASK_HOOK_FILE);
+  const hookSrc = fs.readFileSync(path.join(TEMPLATES, 'hooks', 'margin-asks.mjs'), 'utf8');
+  const hookOld = fs.existsSync(hookPath) ? fs.readFileSync(hookPath, 'utf8') : null;
+  if (hookOld !== hookSrc) {
+    fs.mkdirSync(path.dirname(hookPath), { recursive: true });
+    fs.writeFileSync(hookPath, hookSrc);
+    done.push(`${hookOld == null ? 'created' : 'updated'} ${ASK_HOOK_FILE}`);
+  }
 
   writeIfAbsent(path.join(dir, '.claude', 'CLAUDE.md'), fs.readFileSync(path.join(TEMPLATES, 'CLAUDE.md'), 'utf8'), done, skipped, dir);
   for (const f of fs.readdirSync(path.join(TEMPLATES, 'commands'))) {
@@ -48,7 +68,7 @@ export function init(dir, { port = 4242, log = console.log } = {}) {
   log(`\nMargin set up in ${dir}\n`);
   for (const d of done) log(`  ✓ ${d}`);
   for (const s of skipped) log(`  · ${s}`);
-  log(`\nNext:\n  margin "${dir}"          # start the editor\n  cd "${dir}" && claude    # in another terminal\n\nEdit .claude/CLAUDE.md to describe your journal, style and terminology.\n`);
+  log(`\nNext:\n  margin "${dir}"          # start the editor\n  cd "${dir}" && claude    # in another terminal (restart it if it was already running)\n\nEdit .claude/CLAUDE.md to describe your journal, style and terminology.\n`);
   return { done, skipped };
 }
 

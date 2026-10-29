@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { checkCitations, lookupDoi, addEntry, searchCrossref, parseBib, formatEntry, bibKeys } from './bib.js';
 import { searchZotero, exportFromZotero } from './zotero.js';
 import { registerResponseTools, pointForEdit, respondsToSchema } from './responses-mcp.js';
+import { formatAsks } from './asks.js';
 import { createRequire } from 'node:module';
 
 const { version } = createRequire(import.meta.url)('../package.json');
@@ -16,7 +17,8 @@ const wrap = (fn) => async (args) => { try { return await fn(args || {}); } catc
 
 function describeItem(it) {
   const where = it.orphaned ? `${it.file} (text no longer found)` : `${it.file}:${it.line}`;
-  const head = `[${it.id.slice(0, 8)}] ${it.kind} by ${it.author} — ${it.status} — ${where}`;
+  const kind = it.ask ? `ask for Claude (${it.askState})` : it.kind;
+  const head = `[${it.id.slice(0, 8)}] ${kind} by ${it.author} — ${it.status} — ${where}${it.askId ? ` — for ask ${it.askId.slice(0, 8)}` : ''}`;
   const lines = [head, `  quote: ${JSON.stringify(clip(it.quote, 300))}`];
   if (it.kind === 'suggestion') lines.push(`  replacement: ${JSON.stringify(clip(it.replacement, 300))}`);
   if (it.body) lines.push(`  ${it.kind === 'suggestion' ? 'rationale' : 'comment'}: ${it.body}`);
@@ -50,6 +52,7 @@ export function buildMcpServer(ctx) {
       'For prose, wording and argument changes, use suggest_edit / add_comment so the author can accept or reject them; do not rewrite prose directly.',
       'Direct file edits are fine for mechanical fixes the author asked for (compile errors, bibliography entries, formatting).',
       'Start with get_editor_state to see what the author is looking at and list_review to see open threads, including comments the author left for you.',
+      'Requests the author sends with "Ask Claude" in the editor arrive with their prompt or through get_asks: answer each with reply, and pass its id as `ask` to the suggestions and comments you make for it.',
       'Quote text exactly as it appears in the source, including LaTeX commands; whitespace may differ. Keep each suggestion to one sentence or clause so it can be accepted on its own.',
     ].join(' '),
   });
@@ -98,10 +101,11 @@ export function buildMcpServer(ctx) {
       rationale: z.string().describe('One or two sentences on why — shown to the author'),
       line: z.number().int().positive().optional().describe('Approximate line number, used only if the quote occurs more than once'),
       responds_to: respondsToSchema,
+      ask: z.string().optional().describe('Id of the author\'s ask this answers (from get_asks), so the author sees it linked to their request'),
     },
   }, wrap(async (a) => {
     const point = pointForEdit(review, a.responds_to);
-    const it = review.addSuggestion({ file: a.file, original: a.original, replacement: a.replacement, rationale: a.rationale, line: a.line });
+    const it = review.addSuggestion({ file: a.file, original: a.original, replacement: a.replacement, rationale: a.rationale, line: a.line, askId: a.ask });
     if (point) review.responses.link(point.id, it.id);
     return text(`Suggestion ${it.id.slice(0, 8)} added at ${it.file}:${it.line}${point ? `, linked to R${point.number}` : ''}.`);
   }));
@@ -113,14 +117,15 @@ export function buildMcpServer(ctx) {
       edits: z.array(z.object({
         file: z.string(), original: z.string(), replacement: z.string(), rationale: z.string(), line: z.number().int().positive().optional(),
         responds_to: respondsToSchema,
+        ask: z.string().optional(),
       })).min(1).max(50),
       responds_to: respondsToSchema.describe('Default responds_to for edits that do not set their own'),
     },
   }, wrap(async ({ edits, responds_to }) => {
-    const out = edits.map(({ responds_to: own, ...e }, i) => {
+    const out = edits.map((e, i) => {
       try {
-        const point = pointForEdit(review, own || responds_to);
-        const it = review.addSuggestion(e);
+        const point = pointForEdit(review, e.responds_to || responds_to);
+        const it = review.addSuggestion({ file: e.file, original: e.original, replacement: e.replacement, rationale: e.rationale, line: e.line, askId: e.ask });
         if (point) review.responses.link(point.id, it.id);
         return `${i + 1}. added ${it.id.slice(0, 8)} at ${it.file}:${it.line}${point ? `, linked to R${point.number}` : ''}`;
       } catch (err) { return `${i + 1}. FAILED: ${err.message}`; }
@@ -136,9 +141,10 @@ export function buildMcpServer(ctx) {
       quote: z.string().describe('Exact text the comment refers to'),
       comment: z.string(),
       line: z.number().int().positive().optional(),
+      ask: z.string().optional().describe('Id of the author\'s ask this answers (from get_asks), so the author sees it linked to their request'),
     },
   }, wrap(async (a) => {
-    const it = review.addComment({ file: a.file, quote: a.quote, comment: a.comment, line: a.line });
+    const it = review.addComment({ file: a.file, quote: a.quote, comment: a.comment, line: a.line, askId: a.ask });
     return text(`Comment ${it.id.slice(0, 8)} added at ${it.file}:${it.line}.`);
   }));
 
@@ -152,8 +158,20 @@ export function buildMcpServer(ctx) {
     },
   }, wrap(async ({ status = 'open', file, author }) => {
     const items = review.list({ status, file, author });
+    review.markPickedUp(items.filter((it) => it.askState === 'waiting').map((it) => it.id), 'list_review');
     if (items.length === 0) return text(`No ${status === 'all' ? '' : status + ' '}review items${file ? ' in ' + file : ''}.`);
     return text(items.map(describeItem).join('\n\n'));
+  }));
+
+  server.registerTool('get_asks', {
+    title: 'Requests the author sent you from the editor',
+    description: 'Requests the author addressed to you with "Ask Claude" on a selection in the editor, oldest first, with the selected text, its file:line and any follow-up. Returns the ones still waiting for your answer and shows the author that you have picked them up. Answer each with `reply` on its id; pass its id as `ask` to suggest_edit / suggest_edits / add_comment so what you propose is linked to the request. Leave asks open: the author resolves them.',
+    inputSchema: {},
+  }, wrap(async () => {
+    const asks = review.pendingAsks();
+    if (!asks.length) return text('No requests from the author are waiting. (Their other comments for you are in list_review with author "you".)');
+    review.markPickedUp(asks.map((a) => a.id), 'get_asks');
+    return text(formatAsks(asks));
   }));
 
   server.registerTool('reply', {

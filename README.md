@@ -14,6 +14,8 @@ Overleaf ⇄ git ⇄ your local repo ⇄ Margin server ⇄ browser UI
 - **Editor**: file tree, LaTeX editor, PDF preview, compile log.
 - **PDF ⇄ source**: double-click the PDF to jump to the source; **→ PDF** (⌘/Ctrl+Alt+→) jumps the other way.
 - **Review panel**: Claude's suggestions appear inline as strike-through + insertion and as cards with Accept / Reject / Edit / Reply. Your own comments ("Claude: tighten this?") are requests Claude picks up.
+- **Ask Claude**: select text, press **Ask Claude**, say what you want; your Claude terminal picks it up with your next message, and the card shows *waiting → Claude is on it → answered*, linked to the suggestions Claude made for it.
+- **Split screen**: a compact layout for a short browser window with your Claude terminal underneath.
 - **Sync with Overleaf**: one button commits, pulls Overleaf's changes (rebase), and pushes.
 
 Nothing Margin or Claude needs is ever pushed to Overleaf: review threads, build
@@ -74,9 +76,13 @@ margin init my-paper
 
 This adds (all local-only): `.mcp.json` (connects Claude Code to Margin),
 `.claude/settings.local.json` (approves the Margin tools so Claude doesn't ask
-each time), `.claude/CLAUDE.md` (how Claude should review — **edit the "Project
+each time, and adds the "Ask Claude" prompt hook), `.claude/hooks/margin-asks.mjs`
+(that hook), `.claude/CLAUDE.md` (how Claude should review — **edit the "Project
 notes" section** with your journal, spelling and terminology) and five slash
 commands.
+
+Already set up a paper with an older Margin? Run `margin init my-paper` again: it
+keeps your files and adds what is new. Restart `claude` afterwards.
 
 ## 3. Daily use
 
@@ -93,6 +99,7 @@ Things to say to Claude:
 - `/review Discussion, focus on concision and hedging`
 - `/review` (reviews whatever you've selected in the editor)
 - `/address-comments` (works through the comments you left for it)
+- `/margin` (handles what you sent with **Ask Claude**; see below)
 - `/check-citations`
 - `/fix-compile`
 - `/respond-to-reviewers` (after pasting a referee report in the Response view; see below)
@@ -105,11 +112,12 @@ In the editor:
 | | |
 |---|---|
 | Recompile | ⌘/Ctrl + Enter (or ⌘/Ctrl + S) |
+| Ask Claude about the selection | ⌘/Ctrl + Alt + A |
 | Comment on selection (for Claude or yourself) | ⌘/Ctrl + Alt + C |
 | Source → PDF | ⌘/Ctrl + Alt + → |
 | PDF → source | double-click the PDF |
 | Compiler / main file / auto-recompile | ▾ next to Recompile |
-| Light / dark theme, editor font size | **Aa** in the top bar (saved per browser) |
+| Light / dark theme, editor font size, layout | **Aa** in the top bar (saved per browser) |
 | New file / folder | **+** in the Files pane |
 | Rename, delete, reveal in Finder/Explorer | right-click a file or folder (or its **⋯**) |
 | Add a figure | drag an image or PDF onto the editor: it goes to `figures/` and a `figure` block is inserted |
@@ -117,6 +125,29 @@ In the editor:
 
 Use **Sync with Overleaf** when you want your accepted changes on Overleaf, and
 before starting a session to pull co-authors' edits.
+
+### Split screen with your Claude terminal
+
+Put the browser in the top half of the screen and your `claude` terminal (in the
+paper folder) in the bottom half. Margin switches to its compact **Split screen**
+layout by itself when the window is 660 px tall or less; choose it, or
+**Standard**, under **Aa → Layout**.
+
+1. Select a passage and press **Ask Claude** (⌘/Ctrl + Alt + A). Type what you
+   want, or pick a starter (Concise, Check claim, …), and send with ⌘/Ctrl + Enter.
+   The card reads **Waiting for Claude**.
+2. In the terminal below, type `/margin` and press Enter. Any other message works
+   too: the ask rides along with it. The card turns to **Claude is on it**.
+3. Claude answers on the card and makes its suggestions as tracked changes,
+   linked from the card (click a link to jump to it). The card reads **Claude
+   answered**. Accept or reject the suggestions, reply on the card if you want
+   more (it goes back to waiting for your next message), and **Resolve** it when
+   you're done.
+
+The status bar shows when Claude last used Margin and how many asks are waiting
+(click it to copy `/margin`). Margin never types into or controls your terminal:
+the hand-over happens when you send a message, through a Claude Code hook that
+`margin init` installs. If Margin isn't running, the hook does nothing.
 
 ## What Claude can do (MCP tools)
 
@@ -127,6 +158,7 @@ before starting a session to pull co-authors' edits.
 | `revise_suggestion` | Change a suggestion after your feedback |
 | `add_comment`, `reply`, `resolve` | Comment threads |
 | `list_review` | Open threads, including your comments for Claude |
+| `get_asks` | What you sent with **Ask Claude** that is still waiting for an answer (`suggest_edit`, `suggest_edits` and `add_comment` take its id as `ask` to link their result to it) |
 | `compile` | Recompile; returns errors/warnings with file:line |
 | `show_location` | Scroll your editor and PDF to a spot |
 | `check_citations` | Missing / unused / duplicate keys and DOIs |
@@ -234,8 +266,9 @@ Then open `.git/info/exclude` and delete the block under
 If you had your own `.claude/` folder before running `margin init`, don't delete
 it. Instead remove only what Margin added:
 - `.claude/CLAUDE.md`
-- `.claude/commands/review.md`, `address-comments.md`, `check-citations.md`, `fix-compile.md`
-- in `.claude/settings.local.json`: `"margin"` from `enabledMcpjsonServers`, and `"mcp__margin__*"` from `permissions.allow`
+- `.claude/commands/review.md`, `address-comments.md`, `check-citations.md`, `fix-compile.md`, `margin.md`
+- `.claude/hooks/margin-asks.mjs`
+- in `.claude/settings.local.json`: `"margin"` from `enabledMcpjsonServers`, `"mcp__margin__*"` from `permissions.allow`, and the `UserPromptSubmit` hook that runs `margin-asks.mjs`
 
 `.review/review.json` holds your review threads. Copy it somewhere first if you
 want to keep that history.
@@ -259,12 +292,13 @@ bin/margin.js       CLI (margin, margin init)
 server/app.js       HTTP + WebSocket server, file watcher
 server/mcp.js       Claude's tools (MCP over HTTP at /mcp)
 server/review.js    suggestion/comment store and text anchoring
+server/asks.js      "Ask Claude": hand-over to the Claude terminal, Claude activity
 server/compile.js   latexmk, log parsing, SyncTeX
 server/bib.js       BibTeX parsing, citation checks, DOI/Crossref
 server/zotero.js    Zotero library search and export (Better BibTeX / local API)
 server/git.js       commit / pull --rebase / push
 server/init.js      margin init
-templates/          CLAUDE.md and slash commands installed by init
+templates/          CLAUDE.md, slash commands and the prompt hook installed by init
 web/                UI source (CodeMirror 6, pdf.js) → built into public/
 test/run.mjs        end-to-end test (npm test)
 CLAUDE.md           guide for Claude when working on Margin's code

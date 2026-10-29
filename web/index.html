@@ -6,8 +6,9 @@
   <title>Margin</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%232f7a55'/%3E%3Cpath d='M9 23V9l7 9 7-9v14' fill='none' stroke='white' stroke-width='2.6' stroke-linejoin='round' stroke-linecap='round'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="/style.css">
-  <!-- Apply a forced light/dark theme before first paint (see web/src/settings.js). -->
-  <script>try { var t = localStorage.getItem('margin:theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}</script>
+  <!-- Apply a forced light/dark theme and the split-screen layout before first paint (see web/src/settings.js). -->
+  <script>try { var t = localStorage.getItem('margin:theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}
+  try { var l = localStorage.getItem('margin:layout'); } catch (e) {} document.documentElement.dataset.layout = l === 'split' || (l !== 'standard' && innerHeight <= 660) ? 'split' : 'standard';</script>
 </head>
 <body>
   <header class="topbar">
@@ -49,6 +50,14 @@
             </div>
           </div>
           <label>Editor font size <select id="set-font-size"></select></label>
+          <div class="field"><span>Layout</span>
+            <div class="seg" role="group" aria-label="Layout">
+              <button type="button" data-layout-choice="auto">Auto</button>
+              <button type="button" data-layout-choice="standard">Standard</button>
+              <button type="button" data-layout-choice="split">Split screen</button>
+            </div>
+            <span class="fine">Split screen packs Margin into a short window above your Claude terminal. Auto uses it when the window is 660 px tall or less.</span>
+          </div>
           <p class="fine">Saved in this browser, not in the paper.</p>
         </div>
       </div>
@@ -70,6 +79,7 @@
         <span id="current-file" class="current-file"></span>
         <span id="save-state" class="save-state"></span>
         <span class="spacer"></span>
+        <button id="btn-ask" class="btn sm ask" disabled title="Ask Claude about the selection (Ctrl/⌘ + Alt + A)">Ask Claude</button>
         <button id="btn-comment" class="btn sm ghost" disabled title="Comment on selection (Ctrl/⌘ + Alt + C)">+ Comment</button>
         <button id="btn-forward" class="btn sm ghost" title="Show this line in the PDF (Ctrl/⌘ + Alt + →)">→ PDF</button>
       </div>
@@ -99,6 +109,22 @@
         <textarea rows="3" placeholder="Comment — e.g. “Claude: is this claim supported by Fig. 2?”"></textarea>
         <div class="row">
           <button class="btn sm primary submit">Comment</button>
+          <button class="btn sm cancel">Cancel</button>
+          <span class="fine">⌘/Ctrl + Enter</span>
+        </div>
+      </div>
+      <div id="ask-box" class="ask-box hidden" role="group" aria-label="Ask Claude">
+        <div class="ask-head"><span class="avatar claude" aria-hidden="true">C</span><strong>Ask Claude</strong><span class="fine">about the selected text</span></div>
+        <div class="quote small"></div>
+        <div class="ask-starters">
+          <button type="button" data-ask="Make this more concise.">Concise</button>
+          <button type="button" data-ask="Is this claim supported? Check it against the results and the citations.">Check claim</button>
+          <button type="button" data-ask="Fix grammar, typos and awkward phrasing.">Grammar</button>
+          <button type="button" data-ask="Does this need a citation? Suggest one if so.">Citation?</button>
+        </div>
+        <textarea rows="2" placeholder="What should Claude do with it?"></textarea>
+        <div class="row">
+          <button class="btn sm claude submit">Ask Claude</button>
           <button class="btn sm cancel">Cancel</button>
           <span class="fine">⌘/Ctrl + Enter</span>
         </div>
@@ -160,6 +186,7 @@
   <footer class="statusbar">
     <span id="conn" class="dot off" title="Connecting…"></span>
     <span id="git-status"></span>
+    <button id="claude-status" class="claude-status off" type="button">Claude</button>
     <span class="spacer"></span>
     <span id="wc-sel" class="hidden"></span>
     <button id="wc-btn" class="wc-btn" title="Word count" aria-expanded="false">– words</button>

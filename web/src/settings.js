@@ -1,7 +1,9 @@
-// Appearance settings in the top bar: theme (System / Light / Dark) and editor font size.
+// Appearance settings in the top bar: theme (System / Light / Dark), editor font size and
+// layout (Standard, or Split screen for a short window above a Claude terminal).
 // These are personal, not project settings, so they live in this browser's localStorage
 // rather than in .review/config.json. The theme is also applied before first paint by a
-// one-line script in web/index.html; keep the key and values in sync with it.
+// one-line script in web/index.html, and so is the layout; keep keys, values and the
+// height threshold in sync with it.
 import { $ } from './util.js';
 
 const THEME_KEY = 'margin:theme';
@@ -9,6 +11,11 @@ const SIZE_KEY = 'margin:font-size';
 const THEMES = ['system', 'light', 'dark'];
 const SIZES = [12, 13, 14, 15, 16, 18, 20];
 const DEFAULT_SIZE = 14;
+const LAYOUT_KEY = 'margin:layout';
+const LAYOUTS = ['auto', 'standard', 'split'];
+// Auto switches to split screen at or below this window height: the standard chrome (44px top
+// bar, 34px pane heads, uncollapsed outline) leaves too little editor below it.
+export const SPLIT_MAX_HEIGHT = 660;
 
 // A blocked localStorage (private mode, strict cookie settings) must not stop the app booting.
 const read = (k) => { try { return localStorage.getItem(k); } catch { return null; } };
@@ -20,6 +27,8 @@ export function initSettings(editor) {
   const media = window.matchMedia('(prefers-color-scheme: dark)');
   let theme = THEMES.includes(read(THEME_KEY)) ? read(THEME_KEY) : 'system';
   let size = SIZES.includes(Number(read(SIZE_KEY))) ? Number(read(SIZE_KEY)) : DEFAULT_SIZE;
+  let layout = LAYOUTS.includes(read(LAYOUT_KEY)) ? read(LAYOUT_KEY) : 'auto';
+  let autoCollapsed = false;
 
   sizeSel.replaceChildren(...SIZES.map((n) => new Option(`${n} px`, String(n))));
 
@@ -30,12 +39,36 @@ export function initSettings(editor) {
     editor.remeasure();
     for (const b of menu.querySelectorAll('[data-theme-choice]')) b.classList.toggle('on', b.dataset.themeChoice === theme);
     sizeSel.value = String(size);
+    applyLayout();
+  }
+
+  function applyLayout() {
+    const split = layout === 'split' || (layout === 'auto' && window.innerHeight <= SPLIT_MAX_HEIGHT);
+    const was = root.dataset.layout === 'split';
+    root.dataset.layout = split ? 'split' : 'standard';
+    for (const b of menu.querySelectorAll('[data-layout-choice]')) b.classList.toggle('on', b.dataset.layoutChoice === layout);
+    // The outline is the first thing to give up its height; put it back as it was on leaving.
+    const outline = $('#outline'), toggle = $('#outline .outline-toggle');
+    const setOutline = (closed) => { outline.classList.toggle('collapsed', closed); toggle.setAttribute('aria-expanded', String(!closed)); toggle.textContent = closed ? '▸' : '▾'; };
+    if (split && (!was || !autoCollapsed) && !outline.classList.contains('collapsed') && !outline.dataset.userOpened) { setOutline(true); autoCollapsed = true; }
+    if (!split && was && autoCollapsed) { setOutline(false); autoCollapsed = false; }
+    if (split !== was) editor.remeasure();
   }
 
   for (const b of menu.querySelectorAll('[data-theme-choice]')) {
     b.addEventListener('click', () => { theme = b.dataset.themeChoice; write(THEME_KEY, theme); apply(); });
   }
   sizeSel.addEventListener('change', () => { size = Number(sizeSel.value); write(SIZE_KEY, String(size)); apply(); });
+  for (const b of menu.querySelectorAll('[data-layout-choice]')) {
+    b.addEventListener('click', () => { layout = b.dataset.layoutChoice; write(LAYOUT_KEY, layout); applyLayout(); });
+  }
+  window.addEventListener('resize', () => { if (layout === 'auto') applyLayout(); });
+  // Opening the outline by hand in split screen is a choice: don't fold it again on the next resize.
+  // (main.js toggles the class in its own listener, so look once both have run.)
+  $('#outline .outline-toggle').addEventListener('click', () => setTimeout(() => {
+    if (root.dataset.layout === 'split' && !$('#outline').classList.contains('collapsed')) $('#outline').dataset.userOpened = '1';
+    autoCollapsed = false;
+  }));
   media.addEventListener('change', () => { if (theme === 'system') apply(); });
 
   const open = (on) => { menu.classList.toggle('hidden', !on); btn.setAttribute('aria-expanded', String(on)); };

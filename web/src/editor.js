@@ -35,7 +35,7 @@ function buildDecorations(items, activeId, docLength) {
       if (it.to > it.from) ranges.push({ from: it.from, to: it.to, deco: Decoration.mark({ class: `cm-sugg-del${active ? ' active' : ''}`, attributes: { 'data-review-id': it.id } }) });
       ranges.push({ from: it.to, to: it.to, deco: Decoration.widget({ widget: new InsertWidget(it.replacement, it.id, active), side: 1 }) });
     } else {
-      ranges.push({ from: it.from, to: Math.max(it.to, it.from + 1), deco: Decoration.mark({ class: `cm-comment${it.author === 'you' ? ' mine' : ''}${active ? ' active' : ''}`, attributes: { 'data-review-id': it.id } }) });
+      ranges.push({ from: it.from, to: Math.max(it.to, it.from + 1), deco: Decoration.mark({ class: `cm-comment${it.author === 'you' ? ' mine' : ''}${it.ask ? ' ask' : ''}${active ? ' active' : ''}`, attributes: { 'data-review-id': it.id } }) });
     }
   }
   ranges.sort((a, b) => a.from - b.from || a.to - b.to);

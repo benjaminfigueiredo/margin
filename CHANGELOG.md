@@ -38,6 +38,20 @@
   up before this version, `margin init` adds the new slash command and leaves your other
   files alone.
 
+- **Ask Claude** on a selection (button next to + Comment, or ⌘/Ctrl + Alt + A): say what
+  you want, and your Claude Code terminal picks it up with the next message you send there,
+  or with the new `/margin` command. The card shows where it stands (waiting, Claude is on
+  it, answered) and links to the suggestions Claude made for it. Margin does not run or
+  control Claude: `margin init` installs a small Claude Code hook (local only) that hands
+  waiting asks to Claude when you send a message, and does nothing when Margin isn't
+  running. Asks are ordinary comments with a marker, so review.json keeps its format.
+  Run `margin init` again on papers set up before this, then restart `claude`.
+- New MCP tool `get_asks`; `suggest_edit`, `suggest_edits` and `add_comment` take an
+  optional `ask` id to link what Claude proposes to the request.
+- **Split screen** layout for a short browser window above your Claude terminal: denser
+  chrome, outline folded, popovers kept in view. **Aa → Layout**: Auto (switches at 660 px
+  window height or less), Standard, or Split screen; saved per browser.
+- The status bar shows when Claude last used Margin and how many asks are waiting.
 - Dark theme. Margin follows your system's light/dark setting; **Aa** in the top bar
   forces Light or Dark and sets the editor font size. Both are saved in this browser, not
   in the paper. The editor's syntax colours, suggestion and comment highlights, review
