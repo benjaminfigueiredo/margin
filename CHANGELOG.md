@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- New: Margin tells you when Overleaf has commits you have not pulled. The server fetches every
+  3 minutes (only for a git project with a remote) and the UI shows a banner with a "Pull from
+  Overleaf" button; if a co-author changed the file you have open, the banner names it. Offline, or a
+  remote that needs a password, stays silent. Unsaved edits are saved before the pull, as for Sync.
+- Fix: the "N to pull" count in the status bar was stale. It came from the last fetch, and nothing in
+  Margin ever fetched, so it said nothing to pull however many commits co-authors made.
 - Fix: Margin's own files could be pushed to Overleaf. The guarantee that nothing Margin
   creates reaches your co-authors depended entirely on `.git/info/exclude`, which only
   `margin init` wrote — but `margin <dir>` runs fine on a folder that was never inited, and

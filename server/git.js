@@ -26,7 +26,13 @@ export async function status(project) {
   ]);
   const changed = porcelain.stdout.split('\n').filter(Boolean).map((l) => ({ status: l.slice(0, 2).trim(), path: l.slice(3) }));
   let behind = null; let ahead = null;
+  let incoming = [];
   if (upstream.ok) [behind, ahead] = upstream.stdout.trim().split(/\s+/).map(Number);
+  if (behind > 0) {
+    // Files the remote changed since we diverged (three-dot: only their side).
+    const d = await git(project, ['diff', '--name-only', 'HEAD...@{u}']);
+    if (d.ok) incoming = d.stdout.split('\n').filter(Boolean);
+  }
   return {
     repo: true,
     branch: branch.stdout.trim(),
@@ -35,6 +41,7 @@ export async function status(project) {
     changed,
     ahead,
     behind,
+    incoming,
   };
 }
 
@@ -74,6 +81,19 @@ export async function sync(project, { message = 'Edits via Margin', push = true 
 export async function pull(project) {
   const r = await git(project, ['pull', '--rebase', '--autostash']);
   return { ok: r.ok, out: (r.stdout + r.stderr).trim() };
+}
+
+// Update remote-tracking refs so status().behind reflects what co-authors pushed. Without this
+// `behind` only reflects the last manual fetch. Never throws and never prompts: offline, or a
+// remote that needs a password (GIT_TERMINAL_PROMPT=0), just returns { ok: false }.
+export async function fetch(project, { timeout = 20000 } = {}) {
+  const r = await git(project, ['fetch', '--quiet'], { timeout });
+  return { ok: r.ok, out: (r.stdout + r.stderr).trim() };
+}
+
+export async function hasRemote(project) {
+  if (!(await isRepo(project))) return false;
+  return (await git(project, ['remote'])).stdout.trim().length > 0;
 }
 
 export async function diff(project, file) {

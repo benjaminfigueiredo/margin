@@ -499,6 +499,56 @@ if (running) {
   console.log('excluded; `git add -A` would not stage any of them');
 }
 
+step('git: fetch makes status().behind real; timer only with a remote, cleared by close()');
+{
+  const { fetch: gitFetch } = await import('../server/git.js');
+  const sh = (cwd, ...a) => execFileSync('git', ['-c', 'user.name=test', '-c', 'user.email=test@example.org', ...a], { cwd, stdio: 'pipe' }).toString();
+  const g = fs.mkdtempSync(path.join(os.tmpdir(), 'margin-gitpoll-'));
+  const bare = path.join(g, 'remote.git');
+  sh(g, 'init', '-q', '--bare', '-b', 'master', bare);
+  const mine = path.join(g, 'mine'), theirs = path.join(g, 'theirs');
+  sh(g, 'clone', '-q', bare, mine);
+  fs.writeFileSync(path.join(mine, 'main.tex'), '\\documentclass{article}\\begin{document}Hi\\end{document}\n');
+  fs.writeFileSync(path.join(mine, 'other.tex'), 'other\n');
+  sh(mine, 'add', '-A'); sh(mine, 'commit', '-qm', 'init'); sh(mine, 'push', '-q', '-u', 'origin', 'HEAD:master');
+  sh(g, 'clone', '-q', bare, theirs);
+  const gport = 45000 + Math.floor(Math.random() * 2000);
+  const srv = await startServer({ root: mine, port: gport });
+  const gbase = `http://127.0.0.1:${gport}`;
+  const gstatus = async () => (await (await fetch(`${gbase}/api/git/status`)).json());
+  assert.equal(srv.gitTimerActive(), true, 'a project with a remote starts the poll timer');
+  assert.equal((await gstatus()).behind, 0);
+  fs.writeFileSync(path.join(theirs, 'other.tex'), 'other, edited by a co-author\n');
+  sh(theirs, 'commit', '-qam', 'co-author edit'); sh(theirs, 'push', '-q');
+  assert.equal((await gstatus()).behind, 0, 'stale before any fetch (this is the old bug)');
+  const f = await gitFetch(new Project(mine));
+  assert.equal(f.ok, true);
+  const st = await gstatus();
+  assert.equal(st.behind, 1, 'behind reflects the remote after fetch');
+  assert.deepEqual(st.incoming, ['other.tex']);
+  // A fetch that cannot reach the remote is silent: no throw, ok false.
+  sh(mine, 'remote', 'set-url', 'origin', path.join(g, 'does-not-exist.git'));
+  const bad = await gitFetch(new Project(mine));
+  assert.equal(bad.ok, false);
+  await srv.close();
+  assert.equal(srv.gitTimerActive(), false, 'close() clears the poll timer');
+
+  // No remote: no timer.
+  const lone = path.join(g, 'lone');
+  fs.mkdirSync(lone); sh(lone, 'init', '-q'); fs.writeFileSync(path.join(lone, 'main.tex'), 'x\n'); sh(lone, 'add', '-A'); sh(lone, 'commit', '-qm', 'i');
+  const srv2 = await startServer({ root: lone, port: gport + 1 });
+  assert.equal(srv2.gitTimerActive(), false, 'no remote: no timer');
+  await srv2.close();
+  // Not a git repo: no timer either.
+  const plain = path.join(g, 'plain');
+  fs.mkdirSync(plain); fs.writeFileSync(path.join(plain, 'main.tex'), 'x\n');
+  const srv3 = await startServer({ root: plain, port: gport + 2 });
+  assert.equal(srv3.gitTimerActive(), false, 'not a repo: no timer');
+  await srv3.close();
+  fs.rmSync(g, { recursive: true, force: true });
+  console.log('fetch updates behind; failing fetch is silent; timer absent without remote and cleared on close');
+}
+
 console.log('\nAll checks passed.');
 await client.close();
 if (running) { await running.close(); fs.rmSync(tmp, { recursive: true, force: true }); }

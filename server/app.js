@@ -140,7 +140,7 @@ export async function startServer({ root, port = 4242, main, engine }) {
 
   api.get('/git/status', handle(async () => git.status(project)));
   api.post('/git/sync', handle(async (req) => { const r = await git.sync(project, { message: req.body.message || undefined }); broadcast({ type: 'tree-changed' }); return r; }));
-  api.post('/git/pull', handle(async () => git.pull(project)));
+  api.post('/git/pull', handle(async () => { const r = await git.pull(project); broadcast({ type: 'tree-changed' }); return r; }));
   api.get('/wordcount', handle(async () => countProject(project.main, (rel) => project.read(rel))));
   api.get('/citations', handle(async () => checkCitations(project)));
 
@@ -203,13 +203,34 @@ export async function startServer({ root, port = 4242, main, engine }) {
   let autoTimer = null;
   const scheduleAutoCompile = () => { clearTimeout(autoTimer); autoTimer = setTimeout(() => runCompile('auto'), 1200); };
 
+  // ---------- Overleaf polling ----------
+  // Fetch every few minutes so the author learns about co-authors' commits. Failures (offline, remote
+  // wants a password) are silent: the next tick simply tries again. Only started for a repo with a remote.
+  const GIT_POLL_MS = 180000;
+  let gitTimer = null, gitLast = null, gitPolling = false;
+  const gitKey = (st) => `${st.behind}/${st.ahead}/${(st.incoming || []).join('\n')}`;
+  const gitPoll = async () => {
+    if (gitPolling) return;
+    gitPolling = true;
+    try {
+      await git.fetch(project);
+      const st = await git.status(project);
+      if (!st.repo || st.behind == null) return;
+      if (gitKey(st) !== gitLast) { gitLast = gitKey(st); broadcast({ type: 'git-changed', behind: st.behind, ahead: st.ahead, files: st.incoming || [] }); }
+    } catch { /* silent */ } finally { gitPolling = false; }
+  };
+  if (await git.hasRemote(project)) {
+    gitLast = gitKey(await git.status(project));
+    gitTimer = setInterval(gitPoll, GIT_POLL_MS);
+  }
+
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(port, '127.0.0.1', resolve); });
   // On macOS "localhost" often resolves to the IPv6 address ::1 first, so answer there too.
   // Best effort: machines without IPv6 just keep the IPv4 listener.
   const server6 = http.createServer(app);
   server6.on('upgrade', onUpgrade);
   await new Promise((resolve) => { server6.once('error', () => resolve()); server6.listen(port, '::1', resolve); });
-  return { server, project, review, close: async () => { await watcher.close(); wss.close(); server.close(); server6.close(); } };
+  return { server, project, review, gitPoll, gitTimerActive: () => gitTimer !== null, close: async () => { clearInterval(gitTimer); gitTimer = null; await watcher.close(); wss.close(); server.close(); server6.close(); } };
 }
 
 function summarize(r) {

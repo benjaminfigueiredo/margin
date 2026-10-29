@@ -386,6 +386,31 @@ async function refreshGit() {
   } catch { /* ignore */ }
 }
 
+// Overleaf has commits we have not pulled (server fetches every few minutes). Unsaved edits are
+// flushed first, as for sync: git pull --autostash then rebases onto what is on disk, not a stale copy.
+async function pullFromOverleaf() {
+  try {
+    if (state.dirty) await save();
+    const r = await api('/git/pull', { method: 'POST' });
+    if (!r.ok) { toast(`Pull failed: ${r.out || 'unknown error'}`, 'error', 12000); return; }
+    hideBanner();
+    toast('Pulled from Overleaf', 'ok');
+    await loadTree();
+    await Promise.all([refreshGit(), refreshReview()]);
+    if (state.file && !state.dirty && state.tree.some((e) => e.path === state.file)) await reloadCurrentFromDisk();
+    applyReviewToEditor();
+  } catch (e) { toast(e.message, 'error'); }
+}
+function onGitChanged(msg) {
+  refreshGit();
+  if (!(msg.behind > 0)) return;
+  const n = msg.behind;
+  const hit = state.file && (msg.files || []).includes(state.file);
+  const text = hit ? `${state.file} was changed on Overleaf (${n} new commit${n === 1 ? '' : 's'}). Pull before you keep editing it.`
+    : `Overleaf has ${n} new commit${n === 1 ? '' : 's'} you haven't pulled.`;
+  showBanner(text, [['Pull from Overleaf', () => pullFromOverleaf()], ['Dismiss', () => hideBanner()]]);
+}
+
 $('#btn-sync').addEventListener('click', async () => {
   const msg = prompt('Commit message for your changes (they will be pushed to Overleaf):', 'Edits via Margin');
   if (msg === null) return;
@@ -444,6 +469,7 @@ function connect() {
           applyReviewToEditor();
         }
         break;
+      case 'git-changed': onGitChanged(msg); break;
       case 'compile-start': onCompileStart(msg.by); break;
       case 'compile-done': await onCompileDone(msg); break;
       case 'goto':
