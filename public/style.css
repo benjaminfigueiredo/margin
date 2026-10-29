@@ -493,6 +493,10 @@ body { grid-template-columns: minmax(0, 1fr); }
 @container (max-width: 400px) {
   .editor-head { gap: 3px; padding: 0 6px; }
   .editor-head .btn.sm { padding: 2px 5px; }
+  /* The open file's name is what this header is for: drop the Saved/Unsaved label before
+     squeezing the name below a readable width. */
+  .editor-head .save-state { display: none; }
+  .editor-head .current-file { flex: 0 0 auto; max-width: 45%; min-width: 9ch; }
 }
 .btn.ask { color: var(--ink); border-color: var(--claude); background: var(--claude-soft); font-weight: 600; }
 .btn.ask:hover:not(:disabled) { background: var(--claude); color: var(--seg-on-ink); }
