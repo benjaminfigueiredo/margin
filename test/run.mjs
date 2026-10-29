@@ -266,6 +266,224 @@ assert.equal(fs.existsSync(path.join(safeDir, '.git')), false);
 // Escaping symlinks have their own step ("path safety: symlinks") further up.
 fs.rmSync(safeDir, { recursive: true, force: true });
 
+// File management (roadmap 2.1): create, rename, delete, upload. Every one of them shares Project's guard.
+step('file management: create, folder, upload');
+const fileApi = async (method, url, { json, raw, type } = {}) => {
+  const headers = json !== undefined ? { 'Content-Type': 'application/json' } : raw ? { 'Content-Type': type || 'application/octet-stream' } : {};
+  const res = await fetch(`${base}/api${url}`, { method, headers, body: json !== undefined ? JSON.stringify(json) : raw });
+  return { status: res.status, body: await res.json().catch(() => ({})) };
+};
+const onDisk = (rel) => path.join(paperRoot, rel);
+const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
+const PNG2 = Buffer.concat([PNG, Buffer.from('v2')]);
+{
+  // new file: create-only PUT, parents created, never replaces when exclusive
+  let r = await fileApi('PUT', `/file${q('notes/draft.tex')}&exclusive=1`, { json: { content: 'hello world' } });
+  assert.equal(r.status, 200); assert.equal(fs.readFileSync(onDisk('notes/draft.tex'), 'utf8'), 'hello world');
+  r = await fileApi('PUT', `/file${q('notes/draft.tex')}&exclusive=1`, { json: { content: 'CLOBBER' } });
+  assert.equal(r.status, 409); assert.match(r.body.error, /Already exists/);
+  assert.equal(fs.readFileSync(onDisk('notes/draft.tex'), 'utf8'), 'hello world', 'exclusive create leaves the existing file alone');
+  r = await fileApi('PUT', `/file${q('notes/draft.tex')}`, { json: { content: 'hello again' } });
+  assert.equal(r.status, 200, 'a plain PUT still replaces (that is how saving works)');
+  r = await fileApi('PUT', `/file${q('main.tex/inside.tex')}`, { json: { content: 'x' } });
+  assert.equal(r.status, 400, 'a file where a folder is needed is refused, not a crash');
+  assert.ok(fs.statSync(onDisk('main.tex')).isFile());
+
+  // new folder
+  r = await fileApi('POST', '/folder', { json: { path: 'figures/raw' } });
+  assert.equal(r.status, 200); assert.ok(fs.statSync(onDisk('figures/raw')).isDirectory());
+  assert.ok((await rest('/tree')).some((e) => e.path === 'figures/raw' && e.type === 'dir'), 'an empty folder shows in the tree');
+  r = await fileApi('POST', '/folder', { json: { path: 'figures/raw' } });
+  assert.equal(r.status, 409);
+
+  // upload: binary-exact, refuses to replace without the flag, replaces with it
+  r = await fileApi('POST', `/upload${q('figures/dot.png')}`, { raw: PNG, type: 'image/png' });
+  assert.equal(r.status, 200); assert.deepEqual(fs.readFileSync(onDisk('figures/dot.png')), PNG);
+  r = await fileApi('POST', `/upload${q('figures/dot.png')}`, { raw: PNG2, type: 'image/png' });
+  assert.equal(r.status, 409); assert.match(r.body.error, /Already exists/);
+  assert.deepEqual(fs.readFileSync(onDisk('figures/dot.png')), PNG, 'upload over an existing file is refused and changes nothing');
+  r = await fileApi('POST', `/upload${q('figures/dot.png')}&overwrite=1`, { raw: PNG2, type: 'image/png' });
+  assert.equal(r.status, 200); assert.deepEqual(fs.readFileSync(onDisk('figures/dot.png')), PNG2);
+  r = await fileApi('POST', `/upload${q('figures/raw')}&overwrite=1`, { raw: PNG });
+  assert.equal(r.status, 409, 'not even overwrite replaces a folder');
+  // The body is raw bytes whatever the content type: a .json upload must not be parsed.
+  r = await fileApi('POST', `/upload${q('data/in.json')}`, { raw: Buffer.from('{ "a": 1 }'), type: 'application/json' });
+  assert.equal(r.status, 200); assert.equal(fs.readFileSync(onDisk('data/in.json'), 'utf8'), '{ "a": 1 }');
+  console.log('create-only PUT, folder, upload (binary-exact, no silent replace) ok');
+}
+
+step('file management: oversized upload is rejected');
+{
+  const big = Buffer.alloc(20 * 1024 * 1024 + 1);
+  const r = await fileApi('POST', `/upload${q('figures/huge.png')}`, { raw: big, type: 'image/png' });
+  assert.equal(r.status, 413); assert.match(r.body.error, /20MB/);
+  assert.equal(fs.existsSync(onDisk('figures/huge.png')), false, 'nothing is written for an oversized upload');
+  console.log('413, nothing written');
+}
+
+step('file management: rename and delete round trip; review items follow a rename');
+{
+  const note = await rest('/review/comment', { method: 'POST', body: { file: 'notes/draft.tex', quote: 'hello again', comment: 'Claude: expand this.' } });
+  assert.equal(note.file, 'notes/draft.tex');
+  const itemsFor = async (file) => (await rest('/review')).filter((i) => i.file === file);
+
+  let r = await fileApi('POST', '/file/rename', { json: { from: 'notes/draft.tex', to: 'notes/final.tex' } });
+  assert.equal(r.status, 200); assert.equal(r.body.type, 'file'); assert.equal(r.body.reviewItems, 1);
+  assert.equal(fs.existsSync(onDisk('notes/draft.tex')), false);
+  assert.equal(fs.readFileSync(onDisk('notes/final.tex'), 'utf8'), 'hello again');
+  let moved = await itemsFor('notes/final.tex');
+  assert.equal(moved.length, 1, 'the comment moved with the file');
+  assert.equal(moved[0].orphaned, false, 'and is still anchored to its text');
+  assert.equal((await itemsFor('notes/draft.tex')).length, 0);
+
+  // a folder: everything in it moves, and so do the items under it
+  r = await fileApi('POST', '/file/rename', { json: { from: 'notes', to: 'writing' } });
+  assert.equal(r.status, 200); assert.equal(r.body.type, 'dir');
+  assert.equal(fs.readFileSync(onDisk('writing/final.tex'), 'utf8'), 'hello again');
+  assert.equal((await itemsFor('writing/final.tex')).length, 1);
+  const tree = (await rest('/tree')).map((e) => e.path);
+  assert.ok(tree.includes('writing/final.tex') && !tree.includes('notes/final.tex'));
+
+  // refusals, each leaving everything where it was
+  fs.writeFileSync(onDisk('writing/other.tex'), 'other');
+  r = await fileApi('POST', '/file/rename', { json: { from: 'writing/other.tex', to: 'writing/final.tex' } });
+  assert.equal(r.status, 409); assert.match(r.body.error, /Already exists/);
+  assert.equal(fs.readFileSync(onDisk('writing/final.tex'), 'utf8'), 'hello again');
+  assert.equal(fs.readFileSync(onDisk('writing/other.tex'), 'utf8'), 'other');
+  r = await fileApi('POST', '/file/rename', { json: { from: 'writing', to: 'writing/inner' } });
+  assert.equal(r.status, 400); assert.match(r.body.error, /into itself/);
+  r = await fileApi('POST', '/file/rename', { json: { from: 'main.tex', to: 'paper.tex' } });
+  assert.equal(r.status, 400); assert.match(r.body.error, /main document/);
+  assert.ok(fs.existsSync(onDisk('main.tex')) && !fs.existsSync(onDisk('paper.tex')));
+  r = await fileApi('POST', '/file/rename', { json: { from: 'nope.tex', to: 'x.tex' } });
+  assert.equal(r.status, 400); assert.match(r.body.error, /Not found/);
+  // an explicit overwrite flag replaces a file, but never a folder
+  r = await fileApi('POST', '/file/rename', { json: { from: 'writing/other.tex', to: 'writing/final.tex', overwrite: true } });
+  assert.equal(r.status, 200); assert.equal(fs.readFileSync(onDisk('writing/final.tex'), 'utf8'), 'other');
+  r = await fileApi('POST', '/file/rename', { json: { from: 'writing/final.tex', to: 'figures', overwrite: true } });
+  assert.equal(r.status, 409); assert.match(r.body.error, /folder/);
+  assert.ok(fs.existsSync(onDisk('writing/final.tex')));
+
+  // delete: the main document is refused, with the way out
+  r = await fileApi('DELETE', `/file${q('main.tex')}`);
+  assert.equal(r.status, 400); assert.match(r.body.error, /main document/); assert.match(r.body.error, /Change the main document first/);
+  assert.ok(fs.existsSync(onDisk('main.tex')));
+  r = await fileApi('DELETE', `/file${q('nope.tex')}`);
+  assert.equal(r.status, 400); assert.match(r.body.error, /Not found/);
+
+  // delete: a file with review items. The items are kept, flagged as orphaned because the file is gone.
+  r = await fileApi('DELETE', `/file${q('writing/final.tex')}`);
+  assert.equal(r.status, 200); assert.equal(r.body.type, 'file'); assert.equal(r.body.reviewItemsKept, 1);
+  assert.equal(fs.existsSync(onDisk('writing/final.tex')), false);
+  const kept = await itemsFor('writing/final.tex');
+  assert.equal(kept.length, 1, 'review items survive the deletion of their file');
+  assert.equal(kept[0].orphaned, true); assert.equal(kept[0].fileMissing, true);
+  // ... and anchor again when a file of that name comes back
+  fs.writeFileSync(onDisk('writing/final.tex'), 'hello again');
+  assert.equal((await itemsFor('writing/final.tex'))[0].orphaned, false, 'restoring the file re-anchors the comment');
+  await rest(`/review/${kept[0].id}`, { method: 'DELETE' });
+
+  // delete a folder with everything in it; a .DS_Store inside goes too
+  fs.writeFileSync(onDisk('writing/.DS_Store'), 'x');
+  r = await fileApi('DELETE', `/file${q('writing')}`);
+  assert.equal(r.status, 200); assert.equal(r.body.type, 'dir'); assert.equal(r.body.files, 1);
+  assert.equal(fs.existsSync(onDisk('writing')), false);
+  // a folder holding something Margin hides (node_modules, .git, ...) is refused whole
+  fs.mkdirSync(onDisk('vendor/node_modules'), { recursive: true });
+  fs.writeFileSync(onDisk('vendor/a.tex'), 'a');
+  r = await fileApi('DELETE', `/file${q('vendor')}`);
+  assert.equal(r.status, 400); assert.match(r.body.error, /node_modules/);
+  assert.ok(fs.existsSync(onDisk('vendor/a.tex')) && fs.existsSync(onDisk('vendor/node_modules')), 'nothing was removed');
+  fs.rmSync(onDisk('vendor'), { recursive: true });
+  for (const rel of ['figures', 'data']) assert.equal((await fileApi('DELETE', `/file${q(rel)}`)).status, 200);
+  console.log('rename (files, folders, review items follow), refusals, delete (items kept as orphans, re-anchor on restore) ok');
+}
+
+step('file management: no spelling of a bad path gets through any endpoint');
+{
+  const BAD = ['../x', 'sections/../../x', '/etc/x', '..\\x', 'a/../../x', '.git/x', '.git\\hooks\\x', '.GIT/x', 'a/../.git/x', '.review/x', '.REVIEW/x', '.claude/x', '.margin-build/x', 'node_modules/x', 'sections/node_modules/x', '.mcp.json', '.DS_Store', ''];
+  const listing = () => fs.readdirSync(paperRoot, { recursive: true }).filter((f) => !/^(\.git|\.review|\.margin-build)(\/|$)/.test(String(f)) && !/\.(aux|log|bbl|blg|out|synctex\.gz|fls|fdb_latexmk)$/.test(String(f))).sort();
+  const before = listing();
+  const outside = path.join(path.dirname(paperRoot), 'x');
+  const noProbe = () => {
+    assert.equal(fs.existsSync(outside), false, 'nothing escapes the paper folder');
+    for (const p of ['x', 'etc/x', '.git/x', '.git/hooks/x', '.review/x', '.claude/x', '.margin-build/x', 'node_modules/x', 'sections/node_modules/x']) {
+      assert.equal(fs.existsSync(onDisk(p)), false, `${p} must not exist`);
+    }
+    assert.equal(fs.existsSync(path.join(paperRoot, '.GIT')) || fs.existsSync(path.join(paperRoot, '.REVIEW')), false);
+    assert.deepEqual(listing(), before, 'the paper folder is exactly as it was');
+  };
+  for (const bad of BAD) {
+    const results = {
+      'PUT /file': await fileApi('PUT', `/file${q(bad)}`, { json: { content: 'PWNED' } }),
+      'PUT /file exclusive': await fileApi('PUT', `/file${q(bad)}&exclusive=1`, { json: { content: 'PWNED' } }),
+      'POST /upload': await fileApi('POST', `/upload${q(bad)}&overwrite=1`, { raw: PNG }),
+      'POST /folder': await fileApi('POST', '/folder', { json: { path: bad } }),
+      'POST /file/rename (to)': await fileApi('POST', '/file/rename', { json: { from: 'sections/intro.tex', to: bad, overwrite: true } }),
+      'POST /file/rename (from)': await fileApi('POST', '/file/rename', { json: { from: bad, to: 'taken-from-bad.tex', overwrite: true } }),
+      'DELETE /file': await fileApi('DELETE', `/file${q(bad)}`),
+      'POST /reveal': await fileApi('POST', '/reveal', { json: { path: bad.startsWith('/') || bad.includes('..') ? bad : '../x' } }),
+    };
+    for (const [what, r] of Object.entries(results)) assert.equal(r.status, 400, `${what} ${JSON.stringify(bad)} must be refused with 400, got ${r.status}`);
+    noProbe();
+  }
+  assert.ok(fs.existsSync(onDisk('sections/intro.tex')) && !fs.existsSync(onDisk('taken-from-bad.tex')));
+  console.log(`${BAD.length} bad paths x 8 operations: all 400, nothing touched`);
+}
+
+step('file management: Project-level guards (symlinks, main inside a folder, .git spellings)');
+{
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'margin-fm-'));
+  try {
+    const outside = path.join(dir, 'outside'); const paper = path.join(dir, 'paper');
+    fs.mkdirSync(outside); fs.mkdirSync(path.join(paper, 'sub'), { recursive: true });
+    fs.writeFileSync(path.join(outside, 'secret.txt'), 'ORIGINAL');
+    fs.writeFileSync(path.join(paper, 'sub', 'main.tex'), '\\documentclass{article}');
+    fs.writeFileSync(path.join(paper, 'a.txt'), 'a');
+    fs.symlinkSync(path.join(outside, 'secret.txt'), path.join(paper, 'link.txt'));
+    fs.symlinkSync(outside, path.join(paper, 'linkdir'));
+    const p = new Project(paper, { main: 'sub/main.tex' });
+
+    // the guard is shared by every writer: backslashes, case, and ../ detours cannot reach an ignored folder
+    for (const bad of ['.git\\hooks\\pre-commit', '.GIT/x', 'a/../.git/x', '.review\\x']) {
+      assert.throws(() => p.write(bad, 'x'), /ignored folder/, `write ${bad}`);
+      assert.throws(() => p.writeBinary(bad, Buffer.from('x')), /ignored folder/, `writeBinary ${bad}`);
+      assert.throws(() => p.mkdir(bad), /ignored folder/, `mkdir ${bad}`);
+      assert.throws(() => p.rename('a.txt', bad), /ignored folder/, `rename to ${bad}`);
+      assert.throws(() => p.remove(bad), /ignored folder|Not found/, `remove ${bad}`);
+    }
+    assert.throws(() => p.write('/abs.tex', 'x'), /Absolute paths/);
+    assert.throws(() => p.rename('a.txt', '.'), /paper folder itself|Absolute/);
+    assert.throws(() => p.remove('sub/..'), /paper folder itself/);
+    assert.equal(fs.existsSync(path.join(paper, '.git')) || fs.existsSync(path.join(paper, '.GIT')), false);
+
+    // symlinks that leave the paper: neither end of a rename, nor delete, nor upload may follow them
+    assert.throws(() => p.rename('a.txt', 'linkdir/a.txt'), /escapes project/);
+    assert.throws(() => p.rename('link.txt', 'b.txt'), /escapes project/);
+    assert.throws(() => p.remove('link.txt'), /escapes project/);
+    assert.throws(() => p.remove('linkdir/secret.txt'), /escapes project/);
+    assert.throws(() => p.writeBinary('linkdir/new.bin', Buffer.from('x')), /escapes project/);
+    assert.equal(fs.readFileSync(path.join(outside, 'secret.txt'), 'utf8'), 'ORIGINAL');
+    assert.deepEqual(fs.readdirSync(outside), ['secret.txt']);
+    // a folder that merely contains an escaping link is deleted without following it
+    fs.mkdirSync(path.join(paper, 'holder')); fs.symlinkSync(outside, path.join(paper, 'holder', 'out'));
+    p.remove('holder');
+    assert.equal(fs.existsSync(path.join(paper, 'holder')), false);
+    assert.equal(fs.readFileSync(path.join(outside, 'secret.txt'), 'utf8'), 'ORIGINAL', 'the link was removed, its target was not touched');
+
+    // the main document, or a folder holding it, cannot be renamed or deleted
+    assert.throws(() => p.remove('sub'), /contains the main document \(sub\/main\.tex\)/);
+    assert.throws(() => p.rename('sub', 'sub2'), /main document/);
+    assert.throws(() => p.remove('sub/main.tex'), /Change the main document first/);
+    assert.ok(fs.existsSync(path.join(paper, 'sub', 'main.tex')));
+    // ... and once main is elsewhere it can go
+    p.main = 'a.tex';
+    p.rename('sub', 'sub2');
+    assert.ok(fs.existsSync(path.join(paper, 'sub2', 'main.tex')));
+    console.log('guards ok');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+}
+
 step('review store: versioning, backups, corruption');
 {
   const { ReviewStore, CURRENT_VERSION } = await import('../server/review.js');

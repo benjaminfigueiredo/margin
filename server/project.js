@@ -7,6 +7,8 @@ import path from 'node:path';
 export const BUILD_DIR = '.margin-build';
 export const REVIEW_DIR = '.review';
 const IGNORED = new Set(['.git', BUILD_DIR, REVIEW_DIR, 'node_modules', '.DS_Store', '.claude', '.mcp.json']);
+// Compared in lower case: on macOS and Windows `.GIT` is the same folder as `.git`.
+const IGNORED_LC = new Set([...IGNORED].map((n) => n.toLowerCase()));
 const TEXT_EXT = new Set(['.tex', '.bib', '.sty', '.cls', '.bst', '.txt', '.md', '.cfg', '.def', '.bbx', '.cbx', '.latexmkrc', '.json', '.yaml', '.yml', '.csv', '.tikz', '.pgf', '.ltx', '.dtx', '.ins', '.clo', '.lco']);
 // Build artefacts LaTeX leaves next to sources when compiled elsewhere (e.g. Overleaf zips, old local builds).
 const ARTEFACT_EXT = new Set(['.aux', '.log', '.out', '.toc', '.lof', '.lot', '.fls', '.fdb_latexmk', '.synctex.gz', '.bbl', '.blg', '.bcf', '.run.xml', '.nav', '.snm', '.vrb']);
@@ -67,7 +69,41 @@ export class Project {
   }
 
   isIgnored(rel) {
-    return rel.split('/').some((seg) => IGNORED.has(seg));
+    return rel.split(/[\\/]/).some((seg) => IGNORED_LC.has(seg.toLowerCase()));
+  }
+
+  // Every change on disk (write, mkdir, rename, remove, upload) resolves its path here, so they
+  // all share one guard: abs() for containment and symlinks, then the ignored-folder check on the
+  // *normalised* path (so `.git\hooks`, `.GIT/x` and `a/../.git/x` are all caught), and no absolute
+  // paths. abs() itself stays lenient for reads: it maps `/x` to `<root>/x`.
+  #target(rel) {
+    if (typeof rel === 'string' && /^[\\/]/.test(rel)) throw new Error(`Absolute paths are not allowed: ${rel}`);
+    const abs = this.abs(rel);
+    const norm = this.rel(abs);
+    if (!norm) throw new Error('That is the paper folder itself');
+    if (this.isIgnored(norm)) throw new Error(`Refusing to touch an ignored folder (.git, .review, .claude, .margin-build, node_modules): ${rel}`);
+    if (/[\u0000-\u001f]/.test(norm)) throw new Error(`File names cannot contain control characters: ${JSON.stringify(rel)}`);
+    return { abs, rel: norm };
+  }
+
+  // mkdir -p, but say what is wrong when a file sits where a folder is needed.
+  #mkdirp(dirAbs, rel) {
+    try { fs.mkdirSync(dirAbs, { recursive: true }); } catch (e) {
+      if (e.code === 'EEXIST' || e.code === 'ENOTDIR') throw conflict(`Part of the path is a file, not a folder: ${rel}`);
+      throw e;
+    }
+  }
+
+  #lstat(abs) {
+    try { return fs.lstatSync(abs); } catch (e) { if (e.code === 'ENOENT' || e.code === 'ENOTDIR') return null; throw e; }
+  }
+
+  // The main document cannot be renamed or deleted from under the compiler (or a folder holding it).
+  #refuseMain(rel, verb) {
+    if (this.main === rel || this.main.startsWith(rel + '/')) {
+      const what = rel === this.main ? `${rel} is the main document` : `${rel} contains the main document (${this.main})`;
+      throw new Error(`${what}. Change the main document first (Recompile ▾ → Main document), then ${verb} it.`);
+    }
   }
 
   tree() {
@@ -99,11 +135,82 @@ export class Project {
     return fs.readFileSync(this.abs(rel), 'utf8');
   }
 
-  write(rel, content) {
-    const p = this.abs(rel);
-    if (this.isIgnored(rel)) throw new Error(`Refusing to write into an ignored folder: ${rel}`);
-    fs.mkdirSync(path.dirname(p), { recursive: true });
-    fs.writeFileSync(p, content, 'utf8');
+  // Creates the file (and any missing folders) or replaces it. `exclusive` makes it create-only:
+  // it fails rather than replace a file that is already there.
+  write(rel, content, { exclusive = false } = {}) {
+    const t = this.#target(rel);
+    this.#mkdirp(path.dirname(t.abs), t.rel);
+    try { fs.writeFileSync(t.abs, content, { encoding: 'utf8', flag: exclusive ? 'wx' : 'w' }); } catch (e) {
+      if (e.code === 'EEXIST') throw conflict(`Already exists: ${t.rel}`);
+      if (e.code === 'EISDIR') throw conflict(`${t.rel} is a folder`);
+      throw e;
+    }
+  }
+
+  // Binary write for uploads. Never replaces an existing file unless `overwrite` is set.
+  writeBinary(rel, buf, { overwrite = false } = {}) {
+    const t = this.#target(rel);
+    const st = this.#lstat(t.abs);
+    if (st?.isDirectory()) throw conflict(`${t.rel} is a folder`);
+    if (st && !overwrite) throw conflict(`Already exists: ${t.rel}`);
+    this.#mkdirp(path.dirname(t.abs), t.rel);
+    try { fs.writeFileSync(t.abs, buf, { flag: overwrite ? 'w' : 'wx' }); } catch (e) {
+      if (e.code === 'EEXIST') throw conflict(`Already exists: ${t.rel}`);
+      throw e;
+    }
+    return { path: t.rel, size: buf.length };
+  }
+
+  mkdir(rel) {
+    const t = this.#target(rel);
+    if (this.#lstat(t.abs)) throw conflict(`Already exists: ${t.rel}`);
+    this.#mkdirp(t.abs, t.rel);
+    return { path: t.rel };
+  }
+
+  // Moves a file or folder. Both ends go through the same guard as write(). Replacing a file needs
+  // `overwrite`; a folder is never replaced.
+  rename(from, to, { overwrite = false } = {}) {
+    const a = this.#target(from);
+    const b = this.#target(to);
+    const st = this.#lstat(a.abs);
+    if (!st) throw new Error(`Not found: ${a.rel}`);
+    if (a.rel === b.rel) throw new Error('The new name is the same as the old one');
+    if (b.rel.startsWith(a.rel + '/')) throw new Error(`Cannot move ${a.rel} into itself`);
+    this.#refuseMain(a.rel, 'rename');
+    const dst = this.#lstat(b.abs);
+    // A case-only rename on a case-insensitive disk (Fig.png -> fig.png) "exists" as the same file.
+    const sameFile = dst && dst.ino === st.ino && dst.dev === st.dev && a.rel.toLowerCase() === b.rel.toLowerCase();
+    if (dst && !sameFile) {
+      if (!overwrite) throw conflict(`Already exists: ${b.rel}`);
+      if (st.isDirectory() || dst.isDirectory()) throw conflict(`Will not replace a folder: ${b.rel}`);
+    }
+    this.#mkdirp(path.dirname(b.abs), b.rel);
+    fs.renameSync(a.abs, b.abs);
+    return { from: a.rel, to: b.rel, type: st.isDirectory() ? 'dir' : 'file' };
+  }
+
+  // Deletes a file, or a folder with everything in it. A folder holding something Margin keeps
+  // out of sight (.git, node_modules, ...) is refused, since the author cannot see what would go.
+  remove(rel) {
+    const t = this.#target(rel);
+    const st = this.#lstat(t.abs);
+    if (!st) throw new Error(`Not found: ${t.rel}`);
+    this.#refuseMain(t.rel, 'delete');
+    if (!st.isDirectory()) { fs.unlinkSync(t.abs); return { path: t.rel, type: 'file', files: 1 }; }
+    let files = 0;
+    const walk = (dir) => {
+      for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+        if (e.name !== '.DS_Store' && IGNORED_LC.has(e.name.toLowerCase())) {
+          throw new Error(`Cannot delete ${t.rel}: it contains ${this.rel(path.join(dir, e.name))}, which Margin keeps out of sight. Remove it in your file manager first.`);
+        }
+        if (e.name === '.DS_Store') continue;
+        if (e.isDirectory()) walk(path.join(dir, e.name)); else files++;
+      }
+    };
+    walk(t.abs);
+    fs.rmSync(t.abs, { recursive: true }); // symlinks inside are unlinked, never followed
+    return { path: t.rel, type: 'dir', files };
   }
 
   exists(rel) {
@@ -114,6 +221,9 @@ export class Project {
   get reviewDir() { return path.join(this.root, REVIEW_DIR); }
   get pdfPath() { return path.join(this.buildDir, this.main.replace(/\.tex$/, '.pdf')); }
 }
+
+// An error the API reports as 409 (something is in the way) instead of 400.
+function conflict(message) { return Object.assign(new Error(message), { status: 409 }); }
 
 export function isTextFile(name) {
   const lower = name.toLowerCase();

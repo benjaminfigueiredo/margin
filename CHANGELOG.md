@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- File management. **+** in the Files pane makes a new file or folder; right-click a file or
+  folder (or use its **⋯**) to rename, delete or reveal it in Finder/Explorer. Drag an image or
+  PDF onto the editor and it is uploaded to `figures/` and a `figure` block with
+  `\includegraphics`, `\caption{}` and a `\label{fig:...}` is inserted; drag any file onto the
+  Files pane to upload it there. Nothing is replaced without asking (a clash in `figures/` gets
+  a `-2`), the main document cannot be renamed or deleted, and the open file stays open when
+  renamed. Comments and suggestions follow a renamed file. When a file is deleted its review
+  items are kept, not deleted: they show as "file missing" under All and attach again if the file
+  returns. There is no trash, so the delete dialog says it cannot be undone.
+- Fix: the guard that keeps Margin out of `.git`, `.review`, `.claude`, `node_modules` and the
+  build folder could be bypassed with a backslash (`.git\hooks\pre-commit`) or, on macOS and
+  Windows, a different case (`.GIT`). One check now covers writing, creating, renaming, deleting
+  and uploading, and refuses absolute paths too. An oversized upload or malformed JSON now
+  gets a JSON error instead of an HTML page. The Main document list in the compile menu now
+  follows files you add or rename.
 - Dark theme. Margin follows your system's light/dark setting; **Aa** in the top bar
   forces Light or Dark and sets the editor font size. Both are saved in this browser, not
   in the paper. The editor's syntax colours, suggestion and comment highlights, review

@@ -92,6 +92,21 @@ export class ReviewStore extends EventEmitter {
     return item;
   }
 
+  // ---------- files ----------
+
+  // Items on `rel`, or on any file inside it when it is a folder.
+  itemsUnder(rel) {
+    return this.data.items.filter((it) => it.file === rel || it.file.startsWith(rel + '/'));
+  }
+
+  // A file or folder was renamed in Margin: its comments and suggestions follow it.
+  moveFile(from, to) {
+    const moved = this.itemsUnder(from);
+    for (const it of moved) it.file = to + it.file.slice(from.length);
+    if (moved.length) this.save();
+    return moved.length;
+  }
+
   // ---------- queries ----------
 
   list({ file, status, kind, author } = {}) {
@@ -108,7 +123,8 @@ export class ReviewStore extends EventEmitter {
 
   withLocation(item, text) {
     const loc = text == null || item.status === 'accepted' ? null : locate(item, text);
-    if (!loc) return { ...item, orphaned: item.status !== 'accepted', from: null, to: null, line: null };
+    // text == null: the file itself is gone (deleted or renamed outside Margin). Its items are kept, not dropped.
+    if (!loc) return { ...item, orphaned: item.status !== 'accepted', fileMissing: text == null, from: null, to: null, line: null };
     return { ...item, orphaned: false, from: loc.from, to: loc.to, line: lineOf(text, loc.from), endLine: lineOf(text, loc.to) };
   }
 

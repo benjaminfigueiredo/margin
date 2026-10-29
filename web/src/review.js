@@ -41,7 +41,7 @@ export function createReviewPanel(root, { getCurrentFile, onFocus, onChanged, sa
         h('div', { class: 'who' }, authorName(it.author), h('span', { class: 'kind' }, ` · ${label}`)),
         h('div', { class: 'when' }, `${scope === 'all' ? it.file + ' · ' : ''}${it.line ? 'line ' + it.line + ' · ' : ''}${timeAgo(it.createdAt)}`)),
       !isOpen ? h('span', { class: `status ${it.status}` }, it.status) : null,
-      it.orphaned && isOpen ? h('span', { class: 'status orphan', title: 'The quoted text is no longer in the file' }, 'text changed') : null,
+      it.orphaned && isOpen ? h('span', { class: 'status orphan', title: it.fileMissing ? `${it.file} no longer exists. This item is kept, and attaches again if the file comes back.` : 'The quoted text is no longer in the file' }, it.fileMissing ? 'file missing' : 'text changed') : null,
     ));
 
     if (it.kind === 'suggestion') {
