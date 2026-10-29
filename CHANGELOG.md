@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Review store safety: `.review/review.json` is now version-checked and migrated (a
+  file from a newer Margin makes startup fail with a clear message instead of being
+  overwritten), the last three versions are kept as `review.json.bak*`, an
+  unreadable file is moved aside as `review.json.corrupt-*` instead of being
+  replaced, and clearing closed items archives them to `.review/archive.json`.
 - New Claude tools `search_zotero` and `cite_from_zotero`: search the Zotero
   library open on this Mac and copy single entries into the paper's `.bib` under
   their Better BibTeX citation keys. Works with group libraries; falls back to

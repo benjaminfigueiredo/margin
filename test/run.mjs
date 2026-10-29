@@ -222,6 +222,57 @@ proj.write('link.tex', 'OVERWRITTEN');
 assert.equal(fs.readFileSync(path.join(outsideDir, 'secret.tex'), 'utf8'), 'OVERWRITTEN');
 fs.rmSync(safeDir, { recursive: true, force: true });
 fs.rmSync(outsideDir, { recursive: true, force: true });
+step('review store: versioning, backups, corruption');
+{
+  const { ReviewStore, CURRENT_VERSION } = await import('../server/review.js');
+  const mk = () => fs.mkdtempSync(path.join(os.tmpdir(), 'margin-rs-'));
+  const storeIn = (dir) => new ReviewStore({ reviewDir: path.join(dir, '.review'), read: () => '' });
+  const item = (id, status = 'open') => ({ id, kind: 'comment', file: 'main.tex', quote: 'q', body: 'b', author: 'x', status, replies: [] });
+  const put = (dir, obj) => { fs.mkdirSync(path.join(dir, '.review'), { recursive: true }); fs.writeFileSync(path.join(dir, '.review', 'review.json'), typeof obj === 'string' ? obj : JSON.stringify(obj)); };
+  const rj = (dir) => path.join(dir, '.review', 'review.json');
+
+  // version 0 (and unversioned) files migrate, keeping items; the original is backed up
+  let d = mk(); put(d, { version: 0, items: [item('aaaa1111')] });
+  let s = storeIn(d);
+  assert.equal(s.data.version, CURRENT_VERSION); assert.equal(s.data.items.length, 1);
+  assert.equal(JSON.parse(fs.readFileSync(rj(d), 'utf8')).version, CURRENT_VERSION);
+  assert.equal(JSON.parse(fs.readFileSync(rj(d) + '.bak', 'utf8')).version, 0);
+  d = mk(); put(d, { items: [item('bbbb2222')] });
+  assert.equal(storeIn(d).data.items.length, 1);
+
+  // too-new version: refuses with a readable error and leaves the file untouched
+  d = mk(); const future = JSON.stringify({ version: 99, items: [item('cccc3333')], extra: true });
+  put(d, future);
+  assert.throws(() => storeIn(d), (e) => e.message.includes(rj(d)) && /newer version of Margin/.test(e.message) && /Update Margin/.test(e.message));
+  assert.equal(fs.readFileSync(rj(d), 'utf8'), future);
+
+  // truncated file: moved aside, not overwritten
+  d = mk(); const broken = '{"version":1,"items":[{"id":"dddd'; put(d, broken);
+  const warn = console.warn; console.warn = () => {};
+  try { s = storeIn(d); } finally { console.warn = warn; }
+  assert.equal(s.data.items.length, 0);
+  assert.ok(!fs.existsSync(rj(d)));
+  const aside = fs.readdirSync(path.join(d, '.review')).filter((f) => f.startsWith('review.json.corrupt-'));
+  assert.equal(aside.length, 1);
+  assert.equal(fs.readFileSync(path.join(d, '.review', aside[0]), 'utf8'), broken);
+  s.data.items.push(item('eeee5555')); s.save();
+  assert.equal(fs.readFileSync(path.join(d, '.review', aside[0]), 'utf8'), broken);
+
+  // backup after a save holds the previous state; rotation is capped
+  s.data.items.push(item('ffff6666')); s.save();
+  assert.equal(JSON.parse(fs.readFileSync(rj(d) + '.bak', 'utf8')).items.length, 1);
+  assert.equal(JSON.parse(fs.readFileSync(rj(d), 'utf8')).items.length, 2);
+  for (let i = 0; i < 6; i++) { s.data.items.push(item('gggg000' + i)); s.save(); }
+  assert.ok(!fs.existsSync(rj(d) + '.bak4'));
+  assert.ok(!fs.existsSync(rj(d) + '.tmp'));
+
+  // clearClosed archives what it removes
+  d = mk(); put(d, { version: 1, items: [item('h1', 'open'), item('h2', 'accepted'), item('h3', 'rejected')] });
+  s = storeIn(d);
+  assert.equal(s.clearClosed(), 2);
+  assert.deepEqual(s.data.items.map((i) => i.id), ['h1']);
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(d, '.review', 'archive.json'), 'utf8')).items.map((i) => i.id), ['h2', 'h3']);
+}
 
 console.log('\nAll checks passed.');
 await client.close();

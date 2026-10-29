@@ -9,28 +9,81 @@ import { EventEmitter } from 'node:events';
 
 const CONTEXT = 48;
 
+// Schema versioning. review.json is a paper's whole review history and is not in
+// git, so it must never be silently dropped or overwritten.
+//
+// To change the schema: bump CURRENT_VERSION and add MIGRATIONS[<old version>] = a
+// function taking the parsed data at <old version> and returning it at <old
+// version + 1>. load() runs them in order, so every old file reaches the current
+// shape. Never edit an existing migration. A file newer than CURRENT_VERSION is
+// refused (see load()), never rewritten.
+export const CURRENT_VERSION = 1;
+const MIGRATIONS = {
+  // 0 -> 1: files written before versioning existed (no or 0 `version`) hold the same items.
+  0: (d) => ({ ...d, version: 1 }),
+};
+const BACKUPS_KEPT = 3;
+
 export class ReviewStore extends EventEmitter {
   constructor(project) {
     super();
     this.project = project;
     this.file = path.join(project.reviewDir, 'review.json');
-    this.data = { version: 1, items: [] };
+    this.data = { version: CURRENT_VERSION, items: [] };
     this.load();
   }
 
+  // Throws (with a message naming the file) if the file is from a newer Margin;
+  // startServer propagates that and bin/margin.js prints it and exits 1.
   load() {
+    let text;
+    try { text = fs.readFileSync(this.file, 'utf8'); } catch (e) {
+      if (e.code === 'ENOENT') return; // first run
+      throw new Error(`Cannot read ${this.file}: ${e.message}`);
+    }
+    let raw;
     try {
-      const raw = JSON.parse(fs.readFileSync(this.file, 'utf8'));
-      if (Array.isArray(raw.items)) this.data = raw;
-    } catch { /* first run */ }
+      raw = JSON.parse(text);
+      if (!raw || typeof raw !== 'object' || !Array.isArray(raw.items)) throw new Error('no items array');
+    } catch (e) {
+      const aside = `${this.file}.corrupt-${new Date().toISOString().replace(/[:.]/g, '-')}`;
+      fs.renameSync(this.file, aside);
+      console.warn(`margin: ${this.file} could not be read (${e.message}). Moved it to ${aside}; starting with an empty review. Recover by hand from that file or from review.json.bak*.`);
+      return;
+    }
+    let v = Number.isInteger(raw.version) ? raw.version : 0;
+    if (v > CURRENT_VERSION) {
+      throw new Error(`${this.file} was written by a newer version of Margin (review format ${v}; this build understands up to ${CURRENT_VERSION}). Update Margin to open this paper. The file has not been modified.`);
+    }
+    const migrated = v < CURRENT_VERSION;
+    while (v < CURRENT_VERSION) {
+      const m = MIGRATIONS[v];
+      if (!m) throw new Error(`${this.file}: no migration from review format ${v}. The file has not been modified.`);
+      raw = m(raw);
+      v = raw.version;
+    }
+    this.data = raw;
+    if (migrated) this.save(); // save() keeps the pre-migration file as a backup
   }
 
   save() {
     fs.mkdirSync(path.dirname(this.file), { recursive: true });
     const tmp = this.file + '.tmp';
     fs.writeFileSync(tmp, JSON.stringify(this.data, null, 2));
-    fs.renameSync(tmp, this.file);
+    this.rotateBackups();
+    fs.renameSync(tmp, this.file); // atomic; review.json is never missing or partial
     this.emit('change');
+  }
+
+  // Keep the last BACKUPS_KEPT versions: review.json.bak (newest), .bak2, .bak3.
+  // Copies, not renames, so review.json stays in place until the atomic rename.
+  rotateBackups() {
+    if (!fs.existsSync(this.file)) return;
+    for (let i = BACKUPS_KEPT; i >= 2; i--) {
+      const from = this.file + (i === 2 ? '.bak' : `.bak${i - 1}`);
+      if (fs.existsSync(from)) fs.copyFileSync(from, this.file + `.bak${i}`);
+    }
+    fs.copyFileSync(this.file, this.file + '.bak');
   }
 
   get(id) {
@@ -197,11 +250,21 @@ export class ReviewStore extends EventEmitter {
     return item;
   }
 
+  // Removes accepted/rejected items. They are appended to .review/archive.json first,
+  // so this is recoverable by hand.
   clearClosed() {
-    const before = this.data.items.length;
+    const removed = this.data.items.filter((it) => it.status !== 'open');
+    if (!removed.length) return 0;
+    const archive = path.join(path.dirname(this.file), 'archive.json');
+    let old = [];
+    try { old = JSON.parse(fs.readFileSync(archive, 'utf8')).items || []; } catch { /* none yet */ }
+    const stamp = new Date().toISOString();
+    fs.mkdirSync(path.dirname(archive), { recursive: true });
+    fs.writeFileSync(archive + '.tmp', JSON.stringify({ items: [...old, ...removed.map((it) => ({ ...it, archivedAt: stamp }))] }, null, 2));
+    fs.renameSync(archive + '.tmp', archive);
     this.data.items = this.data.items.filter((it) => it.status === 'open');
     this.save();
-    return before - this.data.items.length;
+    return removed.length;
   }
 }
 
