@@ -10,7 +10,8 @@ export default defineConfig({
   outputDir: '.playwright/results',
   workers: 1,
   retries: 0,
-  reporter: 'list',
+  // On CI also report failures as GitHub annotations, so they show on the commit without opening logs.
+  reporter: process.env.CI ? [['list'], ['github']] : 'list',
   timeout: 60_000,
   expect: { timeout: 20_000 },
   use: { ...devices['Desktop Chrome'], viewport: { width: 1500, height: 900 }, trace: 'retain-on-failure' },
