@@ -5,6 +5,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { checkCitations, lookupDoi, addEntry, searchCrossref, parseBib, formatEntry, bibKeys } from './bib.js';
 import { searchZotero, exportFromZotero } from './zotero.js';
+import { registerResponseTools, pointForEdit, respondsToSchema } from './responses-mcp.js';
 import { createRequire } from 'node:module';
 
 const { version } = createRequire(import.meta.url)('../package.json');
@@ -96,10 +97,13 @@ export function buildMcpServer(ctx) {
       replacement: z.string().describe('Proposed new text. Empty string proposes a deletion.'),
       rationale: z.string().describe('One or two sentences on why — shown to the author'),
       line: z.number().int().positive().optional().describe('Approximate line number, used only if the quote occurs more than once'),
+      responds_to: respondsToSchema,
     },
   }, wrap(async (a) => {
+    const point = pointForEdit(review, a.responds_to);
     const it = review.addSuggestion({ file: a.file, original: a.original, replacement: a.replacement, rationale: a.rationale, line: a.line });
-    return text(`Suggestion ${it.id.slice(0, 8)} added at ${it.file}:${it.line}.`);
+    if (point) review.responses.link(point.id, it.id);
+    return text(`Suggestion ${it.id.slice(0, 8)} added at ${it.file}:${it.line}${point ? `, linked to R${point.number}` : ''}.`);
   }));
 
   server.registerTool('suggest_edits', {
@@ -108,12 +112,18 @@ export function buildMcpServer(ctx) {
     inputSchema: {
       edits: z.array(z.object({
         file: z.string(), original: z.string(), replacement: z.string(), rationale: z.string(), line: z.number().int().positive().optional(),
+        responds_to: respondsToSchema,
       })).min(1).max(50),
+      responds_to: respondsToSchema.describe('Default responds_to for edits that do not set their own'),
     },
-  }, wrap(async ({ edits }) => {
-    const out = edits.map((e, i) => {
-      try { const it = review.addSuggestion(e); return `${i + 1}. added ${it.id.slice(0, 8)} at ${it.file}:${it.line}`; }
-      catch (err) { return `${i + 1}. FAILED: ${err.message}`; }
+  }, wrap(async ({ edits, responds_to }) => {
+    const out = edits.map(({ responds_to: own, ...e }, i) => {
+      try {
+        const point = pointForEdit(review, own || responds_to);
+        const it = review.addSuggestion(e);
+        if (point) review.responses.link(point.id, it.id);
+        return `${i + 1}. added ${it.id.slice(0, 8)} at ${it.file}:${it.line}${point ? `, linked to R${point.number}` : ''}`;
+      } catch (err) { return `${i + 1}. FAILED: ${err.message}`; }
     });
     return text(out.join('\n'));
   }));
@@ -258,6 +268,8 @@ export function buildMcpServer(ctx) {
     const r = addEntry(project, entry, file);
     return text(`Added \\cite{${r.key}} to ${r.file}:\n\n${formatEntry(parseBib(entry)[0])}`);
   }));
+
+  registerResponseTools(server, { review, wrap, text });
 
   return server;
 }

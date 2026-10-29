@@ -75,7 +75,7 @@ margin init my-paper
 This adds (all local-only): `.mcp.json` (connects Claude Code to Margin),
 `.claude/settings.local.json` (approves the Margin tools so Claude doesn't ask
 each time), `.claude/CLAUDE.md` (how Claude should review — **edit the "Project
-notes" section** with your journal, spelling and terminology) and four slash
+notes" section** with your journal, spelling and terminology) and five slash
 commands.
 
 ## 3. Daily use
@@ -95,6 +95,7 @@ Things to say to Claude:
 - `/address-comments` (works through the comments you left for it)
 - `/check-citations`
 - `/fix-compile`
+- `/respond-to-reviewers` (after pasting a referee report in the Response view; see below)
 - "Look at my selection — is this claim supported by the results section?"
 - "Add Smith et al. 2021 on copepod heat stress to the bibliography and cite it here"
 - "Cite my Zotero paper on heatwaves and copepod fecundity here"
@@ -118,7 +119,7 @@ before starting a session to pull co-authors' edits.
 | Tool | |
 |---|---|
 | `get_editor_state` | Open file, cursor line, selected text |
-| `suggest_edit`, `suggest_edits` | Tracked-change suggestions (file untouched until you accept) |
+| `suggest_edit`, `suggest_edits` | Tracked-change suggestions (file untouched until you accept); `responds_to` links one to a referee point |
 | `revise_suggestion` | Change a suggestion after your feedback |
 | `add_comment`, `reply`, `resolve` | Comment threads |
 | `list_review` | Open threads, including your comments for Claude |
@@ -128,6 +129,8 @@ before starting a session to pull co-authors' edits.
 | `search_references`, `add_bib_entry` | Crossref search; add BibTeX by DOI (deduplicated) |
 | `search_zotero`, `cite_from_zotero` | Search your Zotero library; copy one entry into the .bib by its citation key |
 | `list_files`, `read_file` | Project files |
+| `get_response` | Referee reports and the point-by-point response, with each point's status (done / pending / mismatch) |
+| `update_response` | Split a report into points; propose stances (you confirm them) and draft replies; link suggestions |
 
 Claude Code's own file tools still work for direct edits; the editor reloads
 when a file changes on disk.
@@ -143,6 +146,34 @@ its citation keys are used, and group libraries are searched too). Without it,
 Margin falls back to Zotero's own local API (Settings → Advanced → "Allow other
 applications on this computer to communicate with Zotero"), which only covers
 My Library. Local file paths, abstracts, notes and keywords are not copied.
+
+### Responding to referees
+
+Switch the review panel to **Response**, press **+ Report** and paste a referee
+report (one per reviewer). Then run `/respond-to-reviewers` in Claude Code:
+
+1. Claude splits the report into numbered points (R1.1, R1.2, …), each quoting
+   the referee, with a proposed stance (agree, partly agree, disagree, clarify)
+   and a draft reply — and stops there.
+2. You confirm or change each stance in the Response view. What to concede and
+   what to rebut is your call; Claude cannot confirm a stance, and won't edit
+   anything for a point until you have.
+3. Run `/respond-to-reviewers` again. Claude implements the agreed points as
+   ordinary suggestions, each linked to its point, and updates the replies.
+4. Accept or reject the suggestions as usual (also from the Response view).
+
+Each point shows a status worked out from its linked suggestions: **done**
+(reply written, every linked suggestion accepted), **pending** (stance not
+confirmed, no reply yet, or suggestions still open) or **mismatch** (a linked
+suggestion was rejected, deleted, or its text was edited away — the reply may
+claim a change that is not in the manuscript). Mismatches are flagged at the top
+of the view and on the Response tab.
+
+**.md** and **.tex** download the response letter: numbered, each referee point
+quoted with your reply under it (the .tex version treats both as plain text and
+escapes characters such as % and $). Reports and responses are stored in
+`.review/responses.json` — on your computer only, never committed or pushed to
+Overleaf — and the export is a download, not a file in the paper folder.
 
 ## How it works
 

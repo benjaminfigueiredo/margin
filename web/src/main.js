@@ -5,6 +5,7 @@ import { createReviewPanel } from './review.js';
 import { initWordCount } from './wordcount.js';
 import { createOutline } from './outline.js';
 import { initSettings } from './settings.js';
+import { createResponsePanel } from './response.js';
 
 const state = {
   project: null,
@@ -171,7 +172,21 @@ const review = createReviewPanel($('#review'), {
   saveIfDirty: () => (state.dirty ? save() : Promise.resolve()),
 });
 
+// Response to referees: a second view in the review rail (web/src/response.js).
+const response = createResponsePanel($('#review'), {
+  onJump: (link) => jumpToLink(link),
+  onChanged: () => refreshReview(),
+  saveIfDirty: () => (state.dirty ? save() : Promise.resolve()),
+});
+async function jumpToLink(link) {
+  const it = review.items.find((x) => x.id === link.id);
+  if (it && it.status === 'open' && it.from != null) return focusItem(it);
+  if (link.file !== state.file) await openFile(link.file, { line: link.line });
+  else if (link.line) editor.gotoLine(link.line);
+}
+
 async function refreshReview() {
+  response.refresh(); // point statuses are derived from the review items
   await review.refresh();
   applyReviewToEditor();
   const open = review.openCount();
@@ -486,6 +501,7 @@ function connect() {
     const msg = JSON.parse(ev.data);
     switch (msg.type) {
       case 'review-changed': await refreshReview(); break;
+      case 'responses-changed': response.refresh(); break;
       case 'tree-changed': await loadTree(); refreshGit(); break;
       case 'file-changed':
         refreshGit();

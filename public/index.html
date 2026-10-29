@@ -79,9 +79,12 @@
 
     <aside id="review" class="pane review-pane">
       <div class="pane-head">
-        <span>Review</span>
+        <div class="seg rail-mode" role="group" aria-label="Review panel view">
+          <button type="button" data-rail="review" class="on" title="Suggestions and comments">Review</button>
+          <button type="button" data-rail="response" title="Point-by-point response to the referees">Response <span id="response-badge" class="rail-badge hidden"></span></button>
+        </div>
         <span class="spacer"></span>
-        <div class="seg">
+        <div class="seg review-only">
           <button data-scope="file" class="on">This file</button>
           <button data-scope="all">All</button>
         </div>
@@ -100,6 +103,7 @@
         </div>
       </div>
       <div id="cards" class="cards"></div>
+      <div id="response" class="response hidden"></div>
     </aside>
 
     <div id="splitter" class="splitter" role="separator" aria-orientation="vertical" title="Drag to resize"></div>

@@ -18,6 +18,7 @@ import { checkCitations } from './bib.js';
 import { buildMcpServer } from './mcp.js';
 import { ensureLocalOnlyExcluded } from './init.js';
 import { countProject } from './wordcount.js';
+import { mountResponseRoutes } from './responses.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(here, '..', 'public');
@@ -135,6 +136,7 @@ export async function startServer({ root, port = 4242, main, engine }) {
   api.post('/review/:id/reply', handle(async (req) => review.reply(req.params.id, { body: req.body.body, author: 'you' })));
   api.delete('/review/:id', handle(async (req) => review.remove(req.params.id)));
   api.post('/review/clear-closed', handle(async () => ({ removed: review.clearClosed() })));
+  mountResponseRoutes(api, { review, handle, broadcast }); // response to referees
 
   api.post('/editor-state', handle(async (req) => { state.editor = { ...req.body, at: Date.now() }; return { ok: true }; }));
 

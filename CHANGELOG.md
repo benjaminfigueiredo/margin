@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- New: reviewer-response mode. In the review panel, **Response** takes a pasted referee
+  report; `/respond-to-reviewers` has Claude split it into numbered points (R1.1, R1.2, …)
+  with a proposed stance and a draft reply, then stop until you have confirmed or changed
+  each stance. Run it again and Claude implements the agreed points as ordinary
+  suggestions linked to their point. Each point shows done, pending or **mismatch** — a
+  linked suggestion was rejected, deleted or edited away, so the reply may claim a change
+  that is not in the manuscript — worked out from the suggestions every time, so rejecting
+  or undoing an accept later updates it. Download the response letter as Markdown or LaTeX
+  (numbered, the referee quoted, your reply under it). Reports and replies are stored in
+  `.review/responses.json`, which never reaches git or Overleaf; the export is a download
+  and writes nothing into the paper folder. New MCP tools `get_response` and
+  `update_response`; `suggest_edit` / `suggest_edits` take `responds_to`. For a paper set
+  up before this version, `margin init` adds the new slash command and leaves your other
+  files alone.
+
 - Dark theme. Margin follows your system's light/dark setting; **Aa** in the top bar
   forces Light or Dark and sets the editor font size. Both are saved in this browser, not
   in the paper. The editor's syntax colours, suggestion and comment highlights, review
