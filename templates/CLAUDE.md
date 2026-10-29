@@ -18,6 +18,12 @@ and sees everything you do through the `margin` MCP tools.
   author's requests to you).
 - When you finish addressing an author comment, `reply` with what you did and
   `resolve` it.
+- **"Ask Claude" requests.** The author can select text in Margin and ask you
+  something about it. These arrive with their next prompt (a note starting
+  "Margin: the author used "Ask Claude"…") or through `get_asks` (the
+  `/margin` command). Answer each with `reply` on its id, pass the id as `ask`
+  to the `suggest_edit` / `suggest_edits` / `add_comment` calls you make for
+  it, and leave it open: the author sees it as answered and resolves it.
 - After structural or bibliography changes, run `compile` and fix what you
   broke.
 

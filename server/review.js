@@ -102,7 +102,7 @@ export class ReviewStore extends EventEmitter {
     };
     return this.data.items
       .filter((it) => (!file || it.file === file) && (!status || status === 'all' || it.status === status) && (!kind || it.kind === kind) && (!author || it.author === author))
-      .map((it) => this.withLocation(it, textOf(it.file)))
+      .map((it) => (it.ask ? { ...this.withLocation(it, textOf(it.file)), ...askInfo(it, this.data.items) } : this.withLocation(it, textOf(it.file))))
       .sort((a, b) => (a.file === b.file ? (a.from ?? Infinity) - (b.from ?? Infinity) : a.file.localeCompare(b.file)));
   }
 
@@ -114,7 +114,7 @@ export class ReviewStore extends EventEmitter {
 
   // ---------- creation ----------
 
-  addSuggestion({ file, original, replacement, rationale = '', author = 'claude', line, contextBefore }) {
+  addSuggestion({ file, original, replacement, rationale = '', author = 'claude', line, contextBefore, askId }) {
     if (original === replacement) throw new Error('replacement is identical to original');
     if (typeof replacement !== 'string') throw new Error('replacement is required (use an empty string to propose a deletion)');
     const { text, match } = this.findUnique(file, original, { line, contextBefore });
@@ -123,16 +123,29 @@ export class ReviewStore extends EventEmitter {
     if (overlapping) {
       throw new Error(`This text overlaps open suggestion ${overlapping.id.slice(0, 8)} (line ${overlapping.line}). Reply to or withdraw that one first, or make one combined suggestion.`);
     }
-    return this.insert({ kind: 'suggestion', file, text, match, replacement, body: rationale, author });
+    const extra = this.askLink(askId);
+    return this.insert({ kind: 'suggestion', file, text, match, replacement, body: rationale, author, extra });
   }
 
-  addComment({ file, quote, comment, author = 'claude', line, contextBefore }) {
+  // ask: true marks a comment the author addressed to Claude ("Ask Claude" in the editor).
+  // askId links Claude's comment to the ask it answers. Both are optional fields on an
+  // ordinary comment, so review.json stays at the same version and older builds simply
+  // show an ask as one of the author's comments.
+  addComment({ file, quote, comment, author = 'claude', line, contextBefore, ask, askId }) {
     if (!comment || !comment.trim()) throw new Error('comment text is required');
+    const extra = ask === true && author === 'you' ? { ask: true } : this.askLink(askId);
     const { text, match } = this.findUnique(file, quote, { line, contextBefore });
-    return this.insert({ kind: 'comment', file, text, match, body: comment, author });
+    return this.insert({ kind: 'comment', file, text, match, body: comment, author, extra });
   }
 
-  insert({ kind, file, text, match, replacement, body, author }) {
+  askLink(askId) {
+    if (askId == null || askId === '') return {};
+    const ask = this.get(String(askId));
+    if (!ask.ask) throw new Error(`${String(askId).slice(0, 8)} is not one of the author's asks (get_asks lists them)`);
+    return { askId: ask.id };
+  }
+
+  insert({ kind, file, text, match, replacement, body, author, extra = {} }) {
     const item = {
       id: crypto.randomUUID(),
       kind,
@@ -142,6 +155,7 @@ export class ReviewStore extends EventEmitter {
       contextAfter: text.slice(match.to, match.to + CONTEXT),
       hintOffset: match.from,
       ...(kind === 'suggestion' ? { replacement } : {}),
+      ...extra,
       body,
       author,
       status: 'open',
@@ -259,6 +273,30 @@ export class ReviewStore extends EventEmitter {
     return item;
   }
 
+  // ---------- asks (comments the author addressed to Claude) ----------
+
+  // Open asks still waiting on Claude (the author has the last word), oldest first.
+  // states: 'waiting' only those not yet handed to Claude; default also 'picked-up'.
+  pendingAsks({ states = ['waiting', 'picked-up'] } = {}) {
+    return this.list({ status: 'open', kind: 'comment', author: 'you' })
+      .filter((it) => it.ask && states.includes(it.askState))
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  }
+
+  // Record that Claude has received these asks (via the prompt hook or an MCP tool), so the
+  // author sees "Claude is on it" instead of "Waiting".
+  markPickedUp(ids, via) {
+    const now = new Date().toISOString();
+    let n = 0;
+    for (const id of ids) {
+      const item = this.data.items.find((it) => it.id === id);
+      if (!item || !item.ask) continue;
+      item.pickedUpAt = now; item.pickedUpVia = via; n++;
+    }
+    if (n) this.save();
+    return n;
+  }
+
   remove(id) {
     const item = this.get(id);
     this.data.items = this.data.items.filter((it) => it !== item);
@@ -282,6 +320,23 @@ export class ReviewStore extends EventEmitter {
     this.save();
     return removed.length;
   }
+}
+
+// ---------- asks ----------
+
+// Where an ask stands, derived from its thread so nothing has to be kept in sync:
+//   waiting    the author has the last word and Claude has not received it yet
+//   picked-up  Claude received it (prompt hook, get_asks or list_review) since then
+//   answered   Claude replied, or linked a suggestion/comment to it, since then
+//   done       resolved
+// A follow-up reply by the author puts it back to waiting.
+export function askInfo(item, all) {
+  const linked = all.filter((x) => x.askId === item.id);
+  let authorAt = item.createdAt;
+  for (const r of item.replies || []) if (r.author !== 'claude' && r.createdAt > authorAt) authorAt = r.createdAt;
+  const answered = (item.replies || []).some((r) => r.author === 'claude' && r.createdAt >= authorAt) || linked.some((x) => x.createdAt >= authorAt);
+  const askState = item.status !== 'open' ? 'done' : answered ? 'answered' : item.pickedUpAt && item.pickedUpAt >= authorAt ? 'picked-up' : 'waiting';
+  return { askState, linked: linked.map((x) => x.id) };
 }
 
 // ---------- anchoring helpers ----------

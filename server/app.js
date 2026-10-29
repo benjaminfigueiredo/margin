@@ -18,6 +18,7 @@ import { checkCitations } from './bib.js';
 import { buildMcpServer } from './mcp.js';
 import { ensureLocalOnlyExcluded } from './init.js';
 import { countProject } from './wordcount.js';
+import { createClaudeLink } from './asks.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(here, '..', 'public');
@@ -66,11 +67,13 @@ export async function startServer({ root, port = 4242, main, engine }) {
     return state.compiling;
   };
 
+  const claude = createClaudeLink({ review, broadcast });
   const ctx = { project, review, state, broadcast, compile: runCompile };
   review.on('change', () => broadcast({ type: 'review-changed' }));
 
   // ---------- MCP (stateless Streamable HTTP; one server instance per request) ----------
   app.post('/mcp', express.json({ limit: '4mb' }), async (req, res) => {
+    claude.noteMcp(req.body);
     const mcp = buildMcpServer(ctx);
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
     res.on('close', () => { transport.close(); mcp.close(); });
@@ -144,6 +147,7 @@ export async function startServer({ root, port = 4242, main, engine }) {
   api.get('/wordcount', handle(async () => countProject(project.main, (rel) => project.read(rel))));
   api.get('/citations', handle(async () => checkCitations(project)));
 
+  claude.mount(api);
   app.use('/api', api);
   app.get('/pdf', (req, res) => {
     if (!fs.existsSync(project.pdfPath)) return res.status(404).send('No PDF yet');
@@ -238,7 +242,7 @@ export async function startServer({ root, port = 4242, main, engine }) {
   const server6 = http.createServer(app);
   server6.on('upgrade', onUpgrade);
   await new Promise((resolve) => { server6.once('error', () => resolve()); server6.listen(port, '::1', resolve); });
-  return { server, project, review, gitPoll, gitTimerActive: () => gitTimer !== null, close: async () => { clearInterval(gitTimer); gitTimer = null; await watcher.close(); wss.close(); server.close(); server6.close(); } };
+  return { server, project, review, gitPoll, gitTimerActive: () => gitTimer !== null, close: async () => { clearInterval(gitTimer); claude.close(); gitTimer = null; await watcher.close(); wss.close(); server.close(); server6.close(); } };
 }
 
 function summarize(r) {

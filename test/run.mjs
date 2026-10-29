@@ -666,6 +666,166 @@ step('git: a conflicted pull is reported, and Sync refuses to commit conflict ma
   console.log('conflicted pull reported, Sync refuses it, junk stays local, no-upstream explained, refused pull passes git\'s reason');
 }
 
+step('Ask Claude: waiting → picked up (prompt hook / get_asks) → answered, with linked suggestions');
+{
+  const { CURRENT_VERSION } = await import('../server/review.js');
+  const byId = async (id) => (await rest('/review')).find((i) => i.id === id);
+  const deliver = () => rest('/asks/deliver', { method: 'POST', body: {} });
+  // The UI posts an ask as a comment with ask: true.
+  const ask = await rest('/review/comment', { method: 'POST', body: { file: 'sections/intro.tex', quote: 'several heatwaves one after another', comment: 'Can this be more specific about the timing?', line: 8, ask: true } });
+  assert.equal(ask.ask, true, JSON.stringify(ask));
+  assert.equal((await byId(ask.id)).askState, 'waiting');
+  // An ordinary comment is not an ask, and Claude cannot create asks.
+  const plain = await rest('/review/comment', { method: 'POST', body: { file: 'main.tex', quote: 'Marine heatwaves', comment: 'note to self' } });
+  assert.equal(plain.ask, undefined); assert.equal((await byId(plain.id)).askState, undefined);
+  // The prompt hook's endpoint hands it over once, then has nothing more to say.
+  let d = await deliver();
+  assert.equal(d.count, 1);
+  assert.match(d.text, /^Margin: the author used "Ask Claude"/);
+  assert.match(d.text, new RegExp(`\\[${ask.id.slice(0, 8)}\\] sections/intro\\.tex:\\d+`));
+  assert.match(d.text, /request: Can this be more specific/);
+  assert.match(d.text, /sections\/intro\.tex:8/);
+  assert.match(d.text, /selected: "several heatwaves one after another"/);
+  assert.equal((await byId(ask.id)).askState, 'picked-up');
+  assert.equal((await byId(ask.id)).pickedUpVia, 'prompt');
+  assert.deepEqual(await deliver(), { count: 0, text: '' }, 'an ask is handed to Claude once');
+  // The deliver endpoint takes JSON only (a plain cross-site form post cannot reach it).
+  const form = await fetch(`${base}/api/asks/deliver`, { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: 'x' });
+  assert.equal(form.status, 415);
+  // get_asks still lists it (picked up, not answered) for /margin.
+  r = await call('get_asks');
+  assert.ok(!r.error); assert.match(r.text, /Can this be more specific/); assert.match(r.text, /pass `ask: "<id>"`/);
+  r = await call('list_review', { author: 'you' });
+  assert.match(r.text, new RegExp(`\\[${ask.id.slice(0, 8)}\\] ask for Claude \\(picked-up\\)`));
+  // Claude answers with a suggestion linked to the ask: answered, and linked both ways.
+  r = await call('suggest_edit', { file: 'sections/intro.tex', original: 'several heatwaves one after another', replacement: 'two or more heatwaves within a single season', rationale: 'More specific, as asked.', ask: ask.id.slice(0, 8) });
+  assert.ok(!r.error, r.text);
+  const sugg = (await rest('/review')).find((i) => i.kind === 'suggestion' && i.askId === ask.id);
+  assert.ok(sugg, 'the suggestion records the ask it answers');
+  let a = await byId(ask.id);
+  assert.equal(a.askState, 'answered'); assert.deepEqual(a.linked, [sugg.id]);
+  r = await call('list_review', { file: 'sections/intro.tex' });
+  assert.match(r.text, new RegExp(`for ask ${ask.id.slice(0, 8)}`));
+  r = await call('get_asks');
+  assert.match(r.text, /No requests from the author are waiting/);
+  // A follow-up from the author puts it back to waiting, and the hook hands it over again with the thread.
+  await rest(`/review/${ask.id}/reply`, { method: 'POST', body: { body: 'Also mention the temperature range.' } });
+  assert.equal((await byId(ask.id)).askState, 'waiting');
+  d = await deliver();
+  assert.equal(d.count, 1); assert.match(d.text, /author: Also mention the temperature range\./);
+  r = await call('reply', { id: ask.id.slice(0, 8), text: 'Added the range in a second suggestion.' });
+  assert.equal((await byId(ask.id)).askState, 'answered');
+  await rest(`/review/${ask.id}/resolve`, { method: 'POST', body: {} });
+  assert.equal((await byId(ask.id)).askState, 'done');
+  // Only asks can be linked to.
+  r = await call('add_comment', { file: 'main.tex', quote: 'Marine heatwaves', comment: 'x', ask: plain.id });
+  assert.ok(r.error); assert.match(r.text, /not one of the author's asks/);
+  // The status bar's "Claude last active": MCP calls are noted.
+  const seen = await rest('/claude');
+  assert.ok(Date.now() - seen.at < 60000, JSON.stringify(seen)); assert.match(seen.what, /^tool:/);
+  // New fields only: the review file keeps its version, so older builds still open it.
+  if (running) assert.equal(JSON.parse(fs.readFileSync(path.join(running.project.root, '.review', 'review.json'), 'utf8')).version, CURRENT_VERSION);
+  assert.equal(CURRENT_VERSION, 1);
+  for (const id of [ask.id, plain.id, sugg.id]) await rest(`/review/${id}`, { method: 'DELETE' });
+}
+
+step('Ask Claude prompt hook: with Margin running, with no server, with no .mcp.json');
+{
+  const { spawn } = await import('node:child_process');
+  const script = fileURLToPath(new URL('../templates/hooks/margin-asks.mjs', import.meta.url));
+  const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'margin-hook-'));
+  const mcpAt = (url) => fs.writeFileSync(path.join(proj, '.mcp.json'), JSON.stringify({ mcpServers: { margin: { type: 'http', url } } }));
+  // Run it exactly as Claude Code does: the command from settings.local.json through sh, JSON on stdin.
+  const { ASK_HOOK_COMMAND } = await import('../server/init.js');
+  const hookDir = path.join(proj, '.claude', 'hooks');
+  fs.mkdirSync(hookDir, { recursive: true }); fs.copyFileSync(script, path.join(hookDir, 'margin-asks.mjs'));
+  // Async: the test server runs in this process, so a blocking spawn would starve it.
+  const spawnHook = (cmd, args, input) => new Promise((resolve) => {
+    const t0 = Date.now();
+    const p = spawn(cmd, args, { env: { ...process.env, CLAUDE_PROJECT_DIR: proj } });
+    let out = '', err = '';
+    p.stdout.on('data', (c) => { out += c; });
+    p.stderr.on('data', (c) => { err += c; });
+    const kill = setTimeout(() => p.kill('SIGKILL'), 10000);
+    p.on('close', (code) => { clearTimeout(kill); resolve({ code, out, err, ms: Date.now() - t0 }); });
+    p.stdin.end(input);
+  });
+  const runHook = (prompt) => spawnHook('sh', ['-c', ASK_HOOK_COMMAND], JSON.stringify({ hook_event_name: 'UserPromptSubmit', prompt, cwd: proj }));
+  mcpAt(`${base}/mcp`);
+  const ask = await rest('/review/comment', { method: 'POST', body: { file: 'main.tex', quote: 'Marine heatwaves', comment: 'Hook test: shorten the title?', line: 1, ask: true } });
+  let h = await runHook('/margin');
+  assert.equal(h.code, 0); assert.equal(h.out, '', '/margin fetches asks itself; the hook stays quiet');
+  assert.equal((await rest('/review')).find((i) => i.id === ask.id).askState, 'waiting');
+  h = await runHook('go');
+  assert.equal(h.code, 0, h.err); assert.match(h.out, /Hook test: shorten the title\?/); assert.equal(h.err, '');
+  console.log(`running server: exit 0 in ${h.ms} ms, printed ${h.out.length} chars`);
+  assert.equal((await rest('/review')).find((i) => i.id === ask.id).askState, 'picked-up');
+  h = await runHook('go');
+  assert.equal(h.code, 0); assert.equal(h.out, '', 'nothing printed when nothing is waiting');
+  // No server on the port: silent, exit 0, fast.
+  const net = await import('node:net');
+  const free = await new Promise((ok) => { const s = net.createServer().listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => ok(p)); }); });
+  mcpAt(`http://127.0.0.1:${free}/mcp`);
+  h = await runHook('hello');
+  assert.equal(h.code, 0); assert.equal(h.out, ''); assert.equal(h.err, '');
+  assert.ok(h.ms < 2000, `took ${h.ms} ms with no server`);
+  console.log(`no server: exit 0 in ${h.ms} ms, silent`);
+  // A port that accepts but never answers: gives up on its own, still exit 0.
+  const hang = net.createServer(() => {}).listen(0, '127.0.0.1');
+  await new Promise((ok) => hang.once('listening', ok));
+  mcpAt(`http://127.0.0.1:${hang.address().port}/mcp`);
+  h = await runHook('hello');
+  assert.equal(h.code, 0); assert.equal(h.out, ''); assert.ok(h.ms < 3500, `took ${h.ms} ms against a hanging port`);
+  console.log(`hanging port: exit 0 in ${h.ms} ms, silent`);
+  hang.close();
+  // No .mcp.json, and garbage on stdin: still silent.
+  fs.rmSync(path.join(proj, '.mcp.json'));
+  h = await runHook('hello');
+  assert.equal(h.code, 0); assert.equal(h.out, '');
+  const g = await spawnHook('node', [script], 'not json');
+  assert.equal(g.code, 0); assert.equal(g.out, '');
+  await rest(`/review/${ask.id}`, { method: 'DELETE' });
+  fs.rmSync(proj, { recursive: true, force: true });
+}
+
+step('margin init: MCP config, prompt hook, /margin command; idempotent, keeps the author\'s hooks');
+{
+  const { init } = await import('../server/init.js');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'margin-init-'));
+  execFileSync('git', ['init', '-q'], { cwd: dir });
+  execFileSync('git', ['remote', 'add', 'origin', 'https://git.overleaf.com/0000'], { cwd: dir });
+  const settingsFile = path.join(dir, '.claude', 'settings.local.json');
+  fs.mkdirSync(path.dirname(settingsFile), { recursive: true });
+  const mine = { type: 'command', command: 'echo my own hook' };
+  fs.writeFileSync(settingsFile, JSON.stringify({ hooks: { UserPromptSubmit: [{ hooks: [mine] }], Stop: [{ hooks: [mine] }] } }));
+  init(dir, { port: 4321, log: () => {} });
+  init(dir, { port: 4321, log: () => {} });
+  const st = JSON.parse(fs.readFileSync(settingsFile, 'utf8'));
+  assert.deepEqual(st.enabledMcpjsonServers, ['margin']);
+  assert.ok(st.permissions.allow.includes('mcp__margin__*'));
+  const ups = st.hooks.UserPromptSubmit;
+  assert.equal(ups.length, 2, 'the author\'s hook is kept and ours is added once');
+  assert.deepEqual(ups[0].hooks[0], mine);
+  assert.deepEqual(ups[1].hooks, [{ type: 'command', command: 'node "$CLAUDE_PROJECT_DIR/.claude/hooks/margin-asks.mjs"', timeout: 5 }]);
+  assert.deepEqual(st.hooks.Stop, [{ hooks: [mine] }]);
+  const tpl = (p) => fs.readFileSync(fileURLToPath(new URL(`../templates/${p}`, import.meta.url)), 'utf8');
+  assert.equal(fs.readFileSync(path.join(dir, '.claude', 'hooks', 'margin-asks.mjs'), 'utf8'), tpl('hooks/margin-asks.mjs'));
+  assert.equal(fs.readFileSync(path.join(dir, '.claude', 'commands', 'margin.md'), 'utf8'), tpl('commands/margin.md'));
+  assert.equal(JSON.parse(fs.readFileSync(path.join(dir, '.mcp.json'), 'utf8')).mcpServers.margin.url, 'http://127.0.0.1:4321/mcp');
+  // A stale copy of the hook script is refreshed; the author's CLAUDE.md is not.
+  fs.writeFileSync(path.join(dir, '.claude', 'hooks', 'margin-asks.mjs'), '// old');
+  fs.writeFileSync(path.join(dir, '.claude', 'CLAUDE.md'), 'my notes');
+  const { done } = init(dir, { port: 4321, log: () => {} });
+  assert.ok(done.some((x) => /updated .claude.hooks.margin-asks\.mjs/.test(x)), done.join('\n'));
+  assert.equal(fs.readFileSync(path.join(dir, '.claude', 'hooks', 'margin-asks.mjs'), 'utf8'), tpl('hooks/margin-asks.mjs'));
+  assert.equal(fs.readFileSync(path.join(dir, '.claude', 'CLAUDE.md'), 'utf8'), 'my notes');
+  // Everything init wrote stays out of git, and the editor does not list it.
+  const status = execFileSync('git', ['status', '--porcelain', '--untracked-files=all'], { cwd: dir }).toString();
+  assert.equal(status.trim(), '', `init left files git would push:\n${status}`);
+  assert.ok(new Project(dir).isIgnored('.claude/hooks/margin-asks.mjs'));
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
 console.log('\nAll checks passed.');
 await client.close();
 if (running) { await running.close(); fs.rmSync(tmp, { recursive: true, force: true }); }

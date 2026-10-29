@@ -5,6 +5,7 @@ import { createReviewPanel } from './review.js';
 import { initWordCount } from './wordcount.js';
 import { createOutline } from './outline.js';
 import { initSettings } from './settings.js';
+import { initAsk } from './ask.js';
 
 const state = {
   project: null,
@@ -27,6 +28,7 @@ const editor = createEditor($('#editor'), {
     { key: 'Mod-s', run: () => { save().then(compile); return true; } },
     { key: 'Mod-Alt-ArrowRight', run: () => { forwardSearch(); return true; } },
     { key: 'Mod-Alt-c', run: () => { openCommentBox(); return true; } },
+    { key: 'Mod-Alt-a', run: () => { ask.open(); return true; } },
   ],
 });
 
@@ -169,6 +171,16 @@ const review = createReviewPanel($('#review'), {
   onFocus: (it) => focusItem(it),
   onChanged: () => refreshReview(),
   saveIfDirty: () => (state.dirty ? save() : Promise.resolve()),
+  extra: (it, items) => ask.cardExtra(it, items),
+});
+
+const ask = initAsk({
+  editor,
+  getFile: () => state.file,
+  saveIfDirty: () => (state.dirty ? save() : Promise.resolve()),
+  refreshReview: () => refreshReview(),
+  focusItem: (it) => focusItem(it),
+  showReview: () => { if ($('#review').classList.contains('collapsed')) $('#btn-review').click(); },
 });
 
 async function refreshReview() {
@@ -178,6 +190,7 @@ async function refreshReview() {
   const badge = $('#review-badge');
   badge.textContent = open;
   badge.classList.toggle('hidden', open === 0);
+  ask.update(review.items);
   renderTree();
 }
 
@@ -201,6 +214,7 @@ async function focusItem(it, { fromEditor = false } = {}) {
 function updateCommentButton(s) {
   const has = !s.selection.main.empty;
   $('#btn-comment').disabled = !has;
+  $('#btn-ask').disabled = !has;
 }
 
 function openCommentBox() {
@@ -497,6 +511,7 @@ function connect() {
         break;
       case 'git-changed': onGitChanged(msg); break;
       case 'compile-start': onCompileStart(msg.by); break;
+      case 'claude-activity': ask.onActivity(msg); break;
       case 'compile-done': await onCompileDone(msg); break;
       case 'goto':
         await openFile(msg.file);

@@ -1,7 +1,7 @@
 // Review rail: cards for suggestions and comments, with accept/reject/edit/reply.
 import { api, h, toast, timeAgo, wordDiff } from './util.js';
 
-export function createReviewPanel(root, { getCurrentFile, onFocus, onChanged, saveIfDirty }) {
+export function createReviewPanel(root, { getCurrentFile, onFocus, onChanged, saveIfDirty, extra }) {
   let items = [];
   let scope = 'file';
   let showClosed = false;
@@ -34,7 +34,7 @@ export function createReviewPanel(root, { getCurrentFile, onFocus, onChanged, sa
       onclick: (e) => { if (e.target.closest('button, textarea, input')) return; onFocus(it); },
     });
 
-    const label = it.kind === 'suggestion' ? (it.replacement === '' ? 'Suggested deletion' : 'Suggested edit') : 'Comment';
+    const label = it.kind === 'suggestion' ? (it.replacement === '' ? 'Suggested deletion' : 'Suggested edit') : it.ask ? 'Ask Claude' : 'Comment';
     el.append(h('div', { class: 'card-head' },
       author(it.author),
       h('div', { class: 'meta' },
@@ -60,6 +60,8 @@ export function createReviewPanel(root, { getCurrentFile, onFocus, onChanged, sa
       el.append(h('div', { class: 'quote' }, it.quote.length > 220 ? it.quote.slice(0, 220) + '…' : it.quote));
     }
     if (it.body) el.append(h('div', { class: 'body' }, it.body));
+    const more = extra?.(it, items); // "Ask Claude" progress and links (web/src/ask.js)
+    if (more) el.append(more);
 
     for (const r of it.replies || []) {
       el.append(h('div', { class: `reply ${r.author}` }, author(r.author), h('div', {}, h('div', { class: 'who' }, authorName(r.author), h('span', { class: 'when' }, ` · ${timeAgo(r.createdAt)}`)), h('div', { class: 'body' }, r.body))));
@@ -117,7 +119,7 @@ export function createReviewPanel(root, { getCurrentFile, onFocus, onChanged, sa
     if (vis.length === 0) {
       list.replaceChildren(h('div', { class: 'empty' },
         h('p', {}, scope === 'file' ? 'No open threads in this file.' : 'No open threads.'),
-        h('p', { class: 'hint' }, 'Select text and press “Comment” to leave a note for Claude, or ask Claude in your terminal to review a section.')));
+        h('p', { class: 'hint' }, 'Select text and press “Ask Claude” to send Claude a request, “Comment” to leave a note, or ask Claude in your terminal to review a section.')));
       return;
     }
     list.replaceChildren(...vis.map(card));
