@@ -1,7 +1,7 @@
 // CodeMirror 6 editor with LaTeX highlighting and inline review decorations:
 // suggestions render as struck-through original + inserted replacement, comments as highlights.
-import { EditorView, keymap, Decoration, WidgetType, lineNumbers, highlightActiveLine, highlightActiveLineGutter, drawSelection, dropCursor, rectangularSelection, crosshairCursor, highlightSpecialChars } from '@codemirror/view';
-import { EditorState, StateField, StateEffect, Compartment, RangeSetBuilder } from '@codemirror/state';
+import { EditorView, keymap, Decoration, WidgetType, lineNumbers, highlightActiveLine, highlightActiveLineGutter, gutter, GutterMarker, drawSelection, dropCursor, rectangularSelection, crosshairCursor, highlightSpecialChars } from '@codemirror/view';
+import { EditorState, StateField, StateEffect, Compartment, RangeSetBuilder, RangeSet } from '@codemirror/state';
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
 import { searchKeymap, highlightSelectionMatches } from '@codemirror/search';
 import { StreamLanguage, syntaxHighlighting, HighlightStyle, bracketMatching, foldGutter, indentOnInput } from '@codemirror/language';
@@ -60,6 +60,57 @@ const reviewField = StateField.define({
   provide: (f) => EditorView.decorations.from(f, (v) => v.deco),
 });
 
+// Compile diagnostics in the gutter: one marker per line, rebuilt wholesale by setDiagnostics and mapped through edits.
+const setDiagnosticMarkers = StateEffect.define();
+
+class DiagnosticMarker extends GutterMarker {
+  constructor(items) { super(); this.items = items; this.severity = items.some((i) => i.severity === 'error') ? 'error' : 'warn'; }
+  eq(other) { return other.items === this.items; }
+  toDOM() {
+    const el = document.createElement('div');
+    el.className = `cm-diag-marker ${this.severity}`;
+    el.title = this.items.map((i) => (i.context ? `${i.message}\n${i.context}` : i.message)).join('\n\n');
+    el.textContent = '●';
+    return el;
+  }
+}
+
+const diagnosticField = StateField.define({
+  create() { return RangeSet.empty; },
+  update(markers, tr) {
+    markers = markers.map(tr.changes);
+    for (const e of tr.effects) if (e.is(setDiagnosticMarkers)) markers = e.value;
+    return markers;
+  },
+});
+
+function buildDiagnosticMarkers(doc, items) {
+  const byLine = new Map();
+  for (const it of items) {
+    if (!it.line || it.line < 1 || it.line > doc.lines) continue;
+    if (!byLine.has(it.line)) byLine.set(it.line, []);
+    byLine.get(it.line).push(it);
+  }
+  const b = new RangeSetBuilder();
+  for (const n of [...byLine.keys()].sort((a, c) => a - c)) b.add(doc.line(n).from, doc.line(n).from, new DiagnosticMarker(byLine.get(n)));
+  return b.finish();
+}
+
+let onDiagnosticClick = null;
+const diagnosticGutter = gutter({
+  class: 'cm-diag-gutter',
+  markers: (v) => v.state.field(diagnosticField),
+  domEventHandlers: {
+    mousedown(view, line) {
+      let hit = null;
+      view.state.field(diagnosticField).between(line.from, line.from, (from, to, m) => { hit = m; });
+      if (!hit) return false;
+      onDiagnosticClick?.(hit.items);
+      return true;
+    },
+  },
+});
+
 const highlight = HighlightStyle.define([
   { tag: t.keyword, color: '#7a3e9d' },           // \commands
   { tag: t.tagName, color: '#7a3e9d' },
@@ -87,7 +138,7 @@ export function createEditor(parent, { onChange, onSelection, onReviewClick, key
   const wrapping = new Compartment();
   const readOnly = new Compartment();
   const extensions = [
-    lineNumbers(), highlightActiveLineGutter(), highlightSpecialChars(), history(), foldGutter(), drawSelection(), dropCursor(),
+    diagnosticField, diagnosticGutter, lineNumbers(), highlightActiveLineGutter(), highlightSpecialChars(), history(), foldGutter(), drawSelection(), dropCursor(),
     EditorState.allowMultipleSelections.of(true), indentOnInput(), bracketMatching(), rectangularSelection(), crosshairCursor(),
     highlightActiveLine(), highlightSelectionMatches(),
     StreamLanguage.define(stex), syntaxHighlighting(highlight), theme,
@@ -127,6 +178,11 @@ export function createEditor(parent, { onChange, onSelection, onReviewClick, key
     getDoc() { return view.state.doc.toString(); },
     setReview(items, active) {
       view.dispatch({ effects: [setItems.of(items), setActive.of(active ?? view.state.field(reviewField).active)] });
+    },
+    // items: [{ line, message, context, severity: 'error' | 'warn' }]; onClick receives the items on the clicked line.
+    setDiagnostics(items, onClick) {
+      onDiagnosticClick = onClick || null;
+      view.dispatch({ effects: setDiagnosticMarkers.of(buildDiagnosticMarkers(view.state.doc, items)) });
     },
     setActive(id) { view.dispatch({ effects: setActive.of(id) }); },
     gotoLine(line, { select = false, flash = true } = {}) {

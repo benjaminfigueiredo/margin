@@ -7,6 +7,9 @@
   suggestion. Author-only: Claude gets no MCP tool for it.
 - Word count: the status bar shows the paper's word count (following `\input`/`\include`; excludes comments, math, tables and the preamble); click it for a per-section breakdown with caption and footnote subtotals. Selecting text shows its count live. `GET /api/wordcount`.
 
+- Compile errors and warnings now appear as red/amber markers in the editor gutter on
+  the line that failed (open file only, box warnings skipped). Hover shows the message;
+  click opens the Logs panel on that entry. A clean compile clears them.
 - Review store safety: `.review/review.json` is now version-checked and migrated (a
   file from a newer Margin makes startup fail with a clear message instead of being
   overwritten), the last three versions are kept as `review.json.bak*`, an

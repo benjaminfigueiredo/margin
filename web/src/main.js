@@ -123,6 +123,7 @@ async function openFile(path, { line } = {}) {
   setSaveState('Saved');
   hideBanner();
   applyReviewToEditor();
+  applyDiagnostics();
   review.render();
   if (line) editor.gotoLine(line);
 }
@@ -271,6 +272,7 @@ async function onCompileDone(msg) {
   btn.querySelector('.label').textContent = 'Recompile';
   state.lastCompile = msg;
   renderLogs();
+  applyDiagnostics();
   const errs = msg.errors.length;
   const warns = msg.warnings.filter((w) => w.kind !== 'box').length;
   const badge = $('#log-badge');
@@ -298,6 +300,20 @@ function renderLogs() {
   if (boxes.length) groups.push(h('details', {}, h('summary', {}, `Typesetting (${boxes.length} over/underfull boxes)`), ...boxes.map((w) => row(w, 'box'))));
   if (!groups.length) groups.push(h('div', { class: 'empty' }, 'No errors or warnings.'));
   list.replaceChildren(...groups);
+}
+
+// Gutter markers for the open file's compile errors and (non-box) warnings; a click reveals the entry in Logs.
+function applyDiagnostics() {
+  const r = state.lastCompile;
+  const items = r ? [...r.errors.map((e) => ({ ...e, severity: 'error' })), ...r.warnings.filter((w) => w.kind !== 'box').map((w) => ({ ...w, severity: 'warn' }))] : [];
+  editor.setDiagnostics(items.filter((it) => it.line && it.file === state.file), (hit) => {
+    showLogs(true);
+    const d = hit[0];
+    const row = [...document.querySelectorAll('#log-list .log-item')].find((el) => el.querySelector('.log-loc')?.textContent === `${d.file}:${d.line}` && el.querySelector('.log-msg')?.textContent === d.message);
+    row?.scrollIntoView({ block: 'center' });
+    row?.classList.add('flash');
+    setTimeout(() => row?.classList.remove('flash'), 1500);
+  });
 }
 
 function showLogs(on) {

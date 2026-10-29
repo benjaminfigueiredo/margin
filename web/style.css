@@ -251,3 +251,9 @@ details summary { cursor: pointer; color: var(--ink-2); margin: 8px 0 4px; }
   .files { width: 170px; }
   .review-pane { width: 260px; }
 }
+
+.cm-diag-gutter { width: 14px; }
+.cm-diag-marker { cursor: pointer; text-align: center; font-size: 10px; line-height: inherit; }
+.cm-diag-marker.error { color: var(--danger); }
+.cm-diag-marker.warn { color: var(--warn); }
+.log-item.flash { animation: flash 1.6s ease-out; }
