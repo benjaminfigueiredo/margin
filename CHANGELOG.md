@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Fix: in a browser that blocks site storage (some private modes, strict cookie settings) a paper
+  page did not open at all. Margin keeps only conveniences there (last open file, pane widths),
+  so it now carries on without them.
+- Security: a paper page now refuses to be shown inside a frame on another site
+  (clickjacking), as the hub already did.
 - The hub: all your papers on one page. `margin hub` (or `margin` with no folder, run outside a
   paper folder) opens a list of your papers with their state and when you last opened them.
   **Open folder…** adds one (the native folder picker on macOS, a path field elsewhere); **Open**

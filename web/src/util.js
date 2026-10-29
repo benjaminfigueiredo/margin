@@ -9,6 +9,13 @@ export async function api(path, { method = 'GET', body } = {}) {
   return data;
 }
 
+// localStorage holds only per-browser conveniences (last file, pane widths). A browser that blocks
+// site storage throws on every access; that must never stop a paper from opening.
+export const store = {
+  get(key) { try { return localStorage.getItem(key); } catch { return null; } },
+  set(key, value) { try { localStorage.setItem(key, value); } catch { /* lasts for this page only */ } },
+};
+
 export const $ = (sel, root = document) => root.querySelector(sel);
 export const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 

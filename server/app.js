@@ -57,6 +57,8 @@ export async function startServer({ root, port = 4242, main, engine, configDir, 
   const allowedHosts = loopbackHosts(port);
   app.use(hostGuard(allowedHosts));
   app.use(crossSiteGuard(allowedHosts));
+  // No other site may put Margin in a frame (clickjacking); the hub sends the same headers.
+  app.use((req, res, next) => { res.set({ 'X-Frame-Options': 'DENY', 'Content-Security-Policy': "frame-ancestors 'none'" }); next(); });
 
   const broadcast = (msg) => {
     const data = JSON.stringify(msg);

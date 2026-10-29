@@ -1,4 +1,4 @@
-import { api, $, $$, h, debounce, toast } from './util.js';
+import { api, store, $, $$, h, debounce, toast } from './util.js';
 import { createEditor, selectionInfo } from './editor.js';
 import { createPdfView } from './pdfview.js';
 import { initPdfFind } from './pdffind.js';
@@ -134,7 +134,7 @@ const files = createFiles({
     // Renaming the open file (or its folder) keeps it open under the new name; the editor is not reloaded.
     if (state.file === from || state.file?.startsWith(`${from}/`)) {
       state.file = to + state.file.slice(from.length);
-      localStorage.setItem(`margin:${state.project.root}:file`, state.file);
+      store.set(`margin:${state.project.root}:file`, state.file);
       $('#current-file').textContent = state.file;
     }
     renderTree();
@@ -152,7 +152,7 @@ async function openFile(path, { line } = {}) {
   if (state.dirty) await save();
   const entry = state.tree.find((e) => e.path === path);
   state.file = path;
-  localStorage.setItem(`margin:${state.project.root}:file`, path);
+  store.set(`margin:${state.project.root}:file`, path);
   $('#current-file').textContent = path;
   renderTree();
   if (entry && !entry.text) {
@@ -480,7 +480,7 @@ async function updateSettings(body) {
 $('#btn-review').addEventListener('click', () => {
   const hidden = $('#review').classList.toggle('collapsed');
   $('#btn-review').classList.toggle('active', !hidden);
-  localStorage.setItem('margin:review-hidden', hidden ? '1' : '');
+  store.set('margin:review-hidden', hidden ? '1' : '');
 });
 
 // ---------- git ----------
@@ -568,7 +568,7 @@ $('#btn-sync').addEventListener('click', async () => {
 (() => {
   const split = $('#splitter');
   const pdfPane = $('#pdf-pane');
-  const saved = Number(localStorage.getItem('margin:pdf-width'));
+  const saved = Number(store.get('margin:pdf-width'));
   if (saved) pdfPane.style.flexBasis = `${saved}px`;
   split.addEventListener('pointerdown', (e) => {
     split.setPointerCapture(e.pointerId);
@@ -580,7 +580,7 @@ $('#btn-sync').addEventListener('click', async () => {
     const up = () => {
       split.removeEventListener('pointermove', move);
       document.body.classList.remove('resizing');
-      localStorage.setItem('margin:pdf-width', String(parseInt(pdfPane.style.flexBasis, 10)));
+      store.set('margin:pdf-width', String(parseInt(pdfPane.style.flexBasis, 10)));
     };
     split.addEventListener('pointermove', move);
     split.addEventListener('pointerup', up, { once: true });
@@ -633,10 +633,10 @@ async function boot() {
   $('#main-file').textContent = state.project.main;
   $('#set-engine').value = state.project.settings.engine;
   $('#set-auto').checked = !!state.project.settings.autoCompile;
-  if (localStorage.getItem('margin:review-hidden')) { $('#review').classList.add('collapsed'); $('#btn-review').classList.remove('active'); }
+  if (store.get('margin:review-hidden')) { $('#review').classList.add('collapsed'); $('#btn-review').classList.remove('active'); }
   await loadTree();
   await refreshReview();
-  const remembered = localStorage.getItem(`margin:${state.project.root}:file`);
+  const remembered = store.get(`margin:${state.project.root}:file`);
   const start = state.tree.some((e) => e.path === remembered) ? remembered : state.project.main;
   if (state.tree.some((e) => e.path === start)) await openFile(start);
   refreshGit();
