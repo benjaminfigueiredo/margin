@@ -316,6 +316,88 @@ step('review store: versioning, backups, corruption');
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(d, '.review', 'archive.json'), 'utf8')).items.map((i) => i.id), ['h2', 'h3']);
 }
 
+step('undo accept (unaccept): deletion, reverse order, edit elsewhere, duplicate text');
+{
+  const F = 'undo-scratch.tex';
+  const readF = () => (rest(`/file?path=${F}`)).then((x) => x.content);
+  const writeF = (content) => rest(`/file?path=${F}`, { method: 'PUT', body: { content } });
+  const suggest = async (original, replacement, extra = {}) => {
+    const x = await rest('/review/suggest', { method: 'POST', body: { file: F, original, replacement, ...extra } });
+    assert.ok(x.id, JSON.stringify(x));
+    return x.id;
+  };
+  const accept = (id) => rest(`/review/${id}/accept`, { method: 'POST', body: {} });
+  const unaccept = (id) => rest(`/review/${id}/unaccept`, { method: 'POST', body: {} });
+  const item = async (id) => (await rest('/review')).find((i) => i.id === id);
+
+  // 1. deletion, restored byte-for-byte; location comes back through the normal path
+  const t1 = 'The first sentence is here. This clause is very unnecessary, and so it goes. The last one follows.\n';
+  await writeF(t1);
+  let a = await suggest('very unnecessary, and so it goes', '');
+  await accept(a);
+  assert.ok(!(await readF()).includes('unnecessary'));
+  assert.equal((await item(a)).from, null, 'accepted items report no location');
+  let u = await unaccept(a);
+  assert.equal(u.error, undefined);
+  assert.equal(await readF(), t1, 'deletion undo restores the file byte-for-byte');
+  u = await item(a);
+  assert.equal(u.status, 'open'); assert.equal(u.orphaned, false);
+  assert.equal(u.from, t1.indexOf('very unnecessary'), 'from/to/line re-anchor after undo');
+  assert.equal(u.line, 1);
+  assert.equal(u.appliedReplacement, undefined); assert.equal(u.decidedBy, undefined); assert.equal(u.decidedAt, undefined);
+  assert.match((await unaccept(a)).error, /Only accepted suggestions/);
+  await rest(`/review/${a}`, { method: 'DELETE' });
+
+  // 2. two accepted in the same paragraph, undone in the other order
+  const t2 = 'Alpha beta gamma delta. Epsilon zeta eta theta. Iota kappa lambda mu.\n';
+  await writeF(t2);
+  const s1 = await suggest('beta gamma', 'BETA GAMMA LONGER REPLACEMENT');
+  const s2 = await suggest('zeta eta', 'Z');
+  await accept(s1); await accept(s2);
+  const both = await readF();
+  assert.ok(both.includes('BETA GAMMA LONGER REPLACEMENT') && both.includes('Epsilon Z theta'));
+  assert.equal((await unaccept(s1)).error, undefined);   // first accepted, undone first
+  assert.equal(await readF(), t2.replace('zeta eta', 'Z'));
+  assert.equal((await unaccept(s2)).error, undefined);
+  assert.equal(await readF(), t2, 'both undone, original text restored');
+  await rest(`/review/${s1}`, { method: 'DELETE' }); await rest(`/review/${s2}`, { method: 'DELETE' });
+
+  // 3. file edited elsewhere between accept and undo; byte-for-byte except for that edit
+  const t3 = 'Intro paragraph one is long enough.\n\nSecond paragraph says quick results are obvious.\n';
+  await writeF(t3);
+  const e1 = await suggest('quick results are obvious', 'results are clear');
+  await accept(e1);
+  const accepted3 = await readF();
+  await writeF('A brand new first paragraph, added later, which shifts offsets.\n\n' + accepted3);
+  assert.equal((await unaccept(e1)).error, undefined);
+  assert.equal(await readF(), 'A brand new first paragraph, added later, which shifts offsets.\n\n' + t3);
+  await rest(`/review/${e1}`, { method: 'DELETE' });
+  // ...and refusal when the applied text itself was edited
+  await writeF(t3);
+  const e2 = await suggest('quick results are obvious', 'results are clear');
+  await accept(e2);
+  const edited = (await readF()).replace('results are clear', 'results are rather clear');
+  await writeF(edited);
+  const refused = await unaccept(e2);
+  assert.match(refused.error, /edited since; undo would not restore the original/);
+  assert.equal(await readF(), edited, 'refused undo leaves the file untouched');
+  assert.equal((await item(e2)).status, 'accepted');
+  await rest(`/review/${e2}`, { method: 'DELETE' });
+
+  // 4. applied text appears twice: hintOffset picks the right one
+  const t4 = 'We sampled in May. Water was warm in May. Then we left.\n\nWe sampled in June. Water was warm in June. Then we left.\n';
+  await writeF(t4);
+  const d1 = await suggest('Water was warm in June.', 'Water was warm in May.');
+  // the replacement text now exists earlier in the file too
+  await accept(d1);
+  const after4 = await readF();
+  assert.equal(after4.split('Water was warm in May.').length - 1, 2);
+  assert.equal((await unaccept(d1)).error, undefined);
+  assert.equal(await readF(), t4, 'the second occurrence was the one restored');
+  await rest(`/review/${d1}`, { method: 'DELETE' });
+  await rest(`/file?path=${F}`, { method: 'DELETE' }).catch(() => {});
+}
+
 console.log('\nAll checks passed.');
 await client.close();
 if (running) { await running.close(); fs.rmSync(tmp, { recursive: true, force: true }); }

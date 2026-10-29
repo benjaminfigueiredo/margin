@@ -197,6 +197,22 @@ export class ReviewStore extends EventEmitter {
     return item;
   }
 
+  // Undo an accepted suggestion: put the original text back where the applied
+  // replacement now sits. Only when the applied text is still in the file as accepted.
+  unaccept(id) {
+    const item = this.get(id);
+    if (item.kind !== 'suggestion' || item.status !== 'accepted') throw new Error('Only accepted suggestions can be undone');
+    const text = this.project.read(item.file);
+    const span = locateApplied(item, text);
+    if (!span) throw new Error('The accepted text has been edited since; undo would not restore the original. Edit the text by hand.');
+    this.project.write(item.file, text.slice(0, span.from) + item.quote + text.slice(span.to));
+    item.status = 'open';
+    delete item.appliedReplacement; delete item.decidedBy; delete item.decidedAt;
+    item.hintOffset = span.from;
+    this.save();
+    return this.withLocation(item, this.project.read(item.file));
+  }
+
   reject(id, { by = 'you', reason } = {}) {
     const item = this.get(id);
     if (item.status !== 'open') throw new Error(`Item is already ${item.status}`);
@@ -302,6 +318,45 @@ export function locate(item, text) {
     if (!best || score > best.score || (score === best.score && dist < best.dist)) best = { ...m, score, dist };
   }
   return { from: best.from, to: best.to };
+}
+
+// Where an accepted suggestion's replacement now sits, or null if it was edited away.
+// Non-empty replacements reuse findAll/locate with the item's original context and the
+// offset recorded at accept time. A deletion leaves nothing to match, so the gap is found
+// between the surrounding context instead (shrinking the window if that context was edited).
+function locateApplied(item, text) {
+  const applied = item.appliedReplacement ?? '';
+  const core = applied.trim();
+  if (core) {
+    const m = locate({ quote: core, contextBefore: item.contextBefore, contextAfter: item.contextAfter, hintOffset: item.hintOffset }, text);
+    if (!m) return null;
+    const lead = applied.slice(0, applied.length - applied.trimStart().length);
+    const trail = applied.slice(applied.trimEnd().length);
+    let { from, to } = m;
+    if (lead && text.slice(from - lead.length, from) === lead) from -= lead.length;
+    if (trail && text.slice(to, to + trail.length) === trail) to += trail.length;
+    return { from, to };
+  }
+  const hint = item.hintOffset ?? 0;
+  if (applied) { // whitespace-only replacement: exact match nearest the recorded offset
+    const hits = []; for (let i = text.indexOf(applied); i >= 0; i = text.indexOf(applied, i + 1)) hits.push(i);
+    if (!hits.length) return null;
+    const i = hits.sort((a, b) => Math.abs(a - hint) - Math.abs(b - hint))[0];
+    return { from: i, to: i + applied.length };
+  }
+  const before = item.contextBefore || '';
+  const after = item.contextAfter || '';
+  for (const n of [CONTEXT, 24, 12]) {
+    const b = before.slice(-n), a = after.slice(0, n);
+    if (!b && !a) break;
+    const needle = b + a;
+    const hits = []; for (let i = text.indexOf(needle); i >= 0; i = text.indexOf(needle, i + 1)) hits.push(i + b.length);
+    if (!hits.length) continue;
+    hits.sort((x, y) => Math.abs(x - hint) - Math.abs(y - hint));
+    if (hits.length > 1 && n < CONTEXT && Math.abs(hits[0] - hint) === Math.abs(hits[1] - hint)) return null;
+    return { from: hits[0], to: hits[0] };
+  }
+  return null;
 }
 
 function commonSuffix(a, b) { let i = 0; while (i < a.length && i < b.length && a[a.length - 1 - i] === b[b.length - 1 - i]) i++; return i; }

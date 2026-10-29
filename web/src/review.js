@@ -82,6 +82,13 @@ export function createReviewPanel(root, { getCurrentFile, onFocus, onChanged }) 
     }
     if (isOpen && !replying.has(it.id)) actions.append(h('button', { class: 'btn sm ghost', onclick: () => { replying.add(it.id); render(); } }, 'Reply'));
     if (!isOpen && it.status !== 'accepted') actions.append(h('button', { class: 'btn sm ghost', onclick: () => act(() => api(`/review/${it.id}/reopen`, { method: 'POST', body: {} })) }, 'Reopen'));
+    if (it.status === 'accepted' && it.kind === 'suggestion') {
+      const unsaved = () => document.getElementById('save-state')?.textContent === 'Unsaved';
+      actions.append(h('button', { class: 'btn sm ghost', title: 'Put the original text back in the source and reopen this suggestion', onclick: () => {
+        if (unsaved() && !confirm('You have unsaved edits in the editor. Undoing writes the file on disk, so those edits may be lost. Undo this accept anyway?')) return;
+        act(() => api(`/review/${it.id}/unaccept`, { method: 'POST', body: {} }), 'Accept undone');
+      } }, 'Undo accept'));
+    }
     if (it.author === 'you' && it.kind === 'comment') actions.append(h('button', { class: 'btn sm ghost danger', title: 'Delete comment', onclick: () => act(() => api(`/review/${it.id}`, { method: 'DELETE' })) }, 'Delete'));
     if (actions.childElementCount) el.append(actions);
     return el;

@@ -116,6 +116,7 @@ export async function startServer({ root, port = 4242, main, engine }) {
   api.post('/review/suggest', handle(async (req) => review.addSuggestion({ ...req.body, author: 'you' })));
   // Accepting rewrites the file on disk; the watcher reports it as an external change so the editor reloads.
   api.post('/review/:id/accept', handle(async (req) => review.accept(req.params.id, { replacement: req.body.replacement })));
+  api.post('/review/:id/unaccept', handle(async (req) => review.unaccept(req.params.id)));
   api.post('/review/:id/reject', handle(async (req) => review.reject(req.params.id, { reason: req.body.reason })));
   api.post('/review/:id/resolve', handle(async (req) => review.resolve(req.params.id)));
   api.post('/review/:id/reopen', handle(async (req) => review.reopen(req.params.id)));
