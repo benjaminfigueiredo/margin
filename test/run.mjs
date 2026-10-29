@@ -180,7 +180,7 @@ step('path safety: symlinks (Project.abs)');
     // lexical escapes still refused
     assert.throws(() => proj.abs('../outside/secret.txt'), /Path escapes project/);
 
-    // paper root itself behind a symlink (macOS /var, /tmp): ordinary paths must work (cf. 3471077)
+    // paper root itself behind a symlink (macOS /var, /tmp): ordinary paths must work (cf. 00726da)
     const viaLink = path.join(dir, 'root-link');
     fs.symlinkSync(paper, viaLink);
     const p2 = new Project(viaLink);
