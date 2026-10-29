@@ -431,6 +431,51 @@ step('word count: totals, per section, comments/math ignored, \\input followed')
   await put('main.tex', ex('main.tex'));
 }
 
+step('watcher: self-write suppression compares content, not time');
+if (running) {
+  const { default: WebSocket } = await import('ws');
+  const events = [];
+  const ws = new WebSocket(base.replace('http', 'ws') + '/ws');
+  await new Promise((resolve, reject) => { ws.once('open', resolve); ws.once('error', reject); });
+  ws.on('message', (m) => { const e = JSON.parse(m); if (e.type === 'file-changed') events.push(e); });
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const waitFor = async (pred, ms = 5000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (events.some(pred)) return true; await sleep(50); } return false; };
+  const putF = (p, content) => rest(`/file?path=${encodeURIComponent(p)}`, { method: 'PUT', body: { content } });
+  const abs = (p) => path.join(running.project.root, p);
+  const f = 'sections/watch-test.tex';
+
+  // a UI save alone is never reported as external
+  events.length = 0;
+  await putF(f, 'first\n');
+  assert.ok(await waitFor((e) => e.path === f), 'watcher reported the UI save');
+  await sleep(500);
+  assert.ok(events.filter((e) => e.path === f).every((e) => !e.external), 'UI save echoed as external');
+
+  // two saves in a row: still no external
+  events.length = 0;
+  await putF(f, 'second\n');
+  await putF(f, 'third\n');
+  assert.ok(await waitFor((e) => e.path === f), 'watcher reported the rapid saves');
+  await sleep(600);
+  assert.ok(events.filter((e) => e.path === f).every((e) => !e.external), 'rapid UI saves echoed as external');
+
+  // a different write right after a save is external, even within the old 1.5 s window
+  events.length = 0;
+  await putF(f, 'fourth\n');
+  fs.writeFileSync(abs(f), 'written by someone else\n');
+  assert.ok(await waitFor((e) => e.path === f && e.external), 'external write right after a UI save was swallowed');
+
+  // and a later UI save is again recognised as ours
+  events.length = 0;
+  await putF(f, 'fifth\n');
+  assert.ok(await waitFor((e) => e.path === f), 'watcher reported the later save');
+  await sleep(500);
+  assert.ok(events.filter((e) => e.path === f).every((e) => !e.external), 'later UI save echoed as external');
+
+  ws.close();
+  fs.rmSync(abs(f), { force: true });
+}
+
 console.log('\nAll checks passed.');
 await client.close();
 if (running) { await running.close(); fs.rmSync(tmp, { recursive: true, force: true }); }

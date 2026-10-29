@@ -68,14 +68,10 @@ test('a deliberate error gets a red marker on its line; fixing it clears it', as
   await expect.poll(async () => (await markedLines(page)).includes(errLine + 1)).toBe(true);
   await expect(page.locator('#save-state')).toHaveText('Saved');
 
-  // Remove the error line in the editor and recompile: the red marker is gone, warnings remain.
-  await page.locator('#editor .cm-line', { hasText: 'thisMacroDoesNotExist' }).click();
-  await page.keyboard.press('Home');
-  await page.keyboard.press('Shift+End');
-  await page.keyboard.press('Delete');
-  await page.keyboard.press('Delete');
+  // Remove the error line by rewriting the file on disk right after the UI save (an external write the
+  // editor must pick up), then recompile: the red marker is gone, warnings remain.
+  fs.writeFileSync(file, fs.readFileSync(file, 'utf8').split('\n').filter((l) => !l.includes('thisMacroDoesNotExist')).join('\n'));
   await expect(page.locator('#editor .cm-content')).not.toContainText('thisMacroDoesNotExist');
-  await expect(page.locator('#save-state')).toHaveText('Saved');
   await recompile(page);
   await expect(marker(page, 'error')).toHaveCount(0);
   // Back to the sample paper's warnings only (none in main.tex).

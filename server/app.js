@@ -5,6 +5,7 @@ import express from 'express';
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import chokidar from 'chokidar';
@@ -98,8 +99,8 @@ export async function startServer({ root, port = 4242, main, engine }) {
   api.put('/file', handle(async (req) => {
     const p = String(req.query.path || '');
     if (typeof req.body.content !== 'string') throw new Error('content is required');
-    selfWrites.set(p, Date.now());
     project.write(p, req.body.content);
+    noteSelfWrite(project.rel(project.abs(p)), req.body.content);
     if (settings.autoCompile) scheduleAutoCompile();
     return { ok: true, mtime: fs.statSync(project.abs(p)).mtimeMs };
   }));
@@ -152,7 +153,29 @@ export async function startServer({ root, port = 4242, main, engine }) {
   wss.on('connection', (ws) => ws.send(JSON.stringify({ type: 'hello', project: project.name })));
 
   // ---------- File watcher ----------
-  const selfWrites = new Map(); // files the UI just saved, so we don't echo them back as external changes
+  // Files the UI just saved: rel path -> { hash of the bytes written, at }. A watcher event is our own
+  // echo only if the file on disk still has exactly those bytes, so a different write that lands right
+  // after an autosave is always reported as external. Entries are kept after a match (a single save can
+  // produce more than one event), dropped on the first mismatch, and swept by age and count.
+  const selfWrites = new Map();
+  const SELF_TTL_MS = 30000, SELF_MAX = 500;
+  const hashOf = (buf) => crypto.createHash('sha256').update(buf).digest('hex');
+  function noteSelfWrite(rel, content) {
+    selfWrites.delete(rel); // re-insert so Map order is oldest-first
+    selfWrites.set(rel, { hash: hashOf(Buffer.from(content, 'utf8')), at: Date.now() });
+    const now = Date.now();
+    for (const [k, v] of selfWrites) {
+      if (selfWrites.size > SELF_MAX || now - v.at > SELF_TTL_MS) selfWrites.delete(k); else break;
+    }
+  }
+  function isSelfWrite(rel) {
+    const e = selfWrites.get(rel);
+    if (!e) return false;
+    let same = false;
+    try { same = hashOf(fs.readFileSync(project.abs(rel))) === e.hash; } catch { /* gone or unreadable: not ours */ }
+    if (!same) selfWrites.delete(rel);
+    return same;
+  }
   const watcher = chokidar.watch(project.root, {
     ignored: (p) => { const rel = project.rel(p); return rel !== '' && project.isIgnored(rel); },
     ignoreInitial: true,
@@ -162,8 +185,7 @@ export async function startServer({ root, port = 4242, main, engine }) {
     const rel = project.rel(p);
     if (event === 'add' || event === 'unlink' || event === 'addDir' || event === 'unlinkDir') broadcast({ type: 'tree-changed' });
     if (event === 'change' || event === 'add') {
-      const t = selfWrites.get(rel);
-      const external = !(t && Date.now() - t < 1500);
+      const external = !isSelfWrite(rel);
       broadcast({ type: 'file-changed', path: rel, external });
       if (external) { broadcast({ type: 'review-changed' }); if (settings.autoCompile) scheduleAutoCompile(); }
     }
