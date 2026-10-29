@@ -3,6 +3,7 @@ import { createEditor, selectionInfo } from './editor.js';
 import { createPdfView } from './pdfview.js';
 import { createReviewPanel } from './review.js';
 import { initWordCount } from './wordcount.js';
+import { createOutline } from './outline.js';
 
 const state = {
   project: null,
@@ -17,8 +18,8 @@ const state = {
 
 // ---------- editor ----------
 const editor = createEditor($('#editor'), {
-  onChange: () => { state.dirty = true; setSaveState('Unsaved'); saveSoon(); },
-  onSelection: (s) => { reportEditorState(s); updateCommentButton(s); },
+  onChange: () => { outlineSoon(); state.dirty = true; setSaveState('Unsaved'); saveSoon(); },
+  onSelection: (s) => { outline.setCursor(s.doc.lineAt(s.selection.main.head).number); reportEditorState(s); updateCommentButton(s); },
   onReviewClick: (id) => { const it = review.items.find((x) => x.id === id); if (it) focusItem(it, { fromEditor: true }); },
   keys: [
     { key: 'Mod-Enter', run: () => { compile(); return true; } },
@@ -29,6 +30,18 @@ const editor = createEditor($('#editor'), {
 });
 
 initWordCount(editor);
+
+// ---------- outline ----------
+const outline = createOutline($('#outline'), {
+  getText: () => (state.file?.endsWith('.tex') ? editor.getDoc() : null),
+  onJump: (line) => editor.gotoLine(line),
+});
+const outlineSoon = debounce(() => outline.update(), 250);
+$('#outline .outline-toggle').addEventListener('click', (e) => {
+  const closed = $('#outline').classList.toggle('collapsed');
+  e.currentTarget.setAttribute('aria-expanded', String(!closed));
+  e.currentTarget.textContent = closed ? '▸' : '▾';
+});
 
 function setSaveState(t) { $('#save-state').textContent = t; }
 
@@ -112,6 +125,7 @@ async function openFile(path, { line } = {}) {
       : h('div', { class: 'empty' }, h('p', {}, 'Binary file — not editable here.'), h('p', {}, h('a', { href: `/api/raw?path=${encodeURIComponent(path)}`, target: '_blank' }, 'Open'))));
     setSaveState('');
     review.render();
+    outline.update();
     return;
   }
   $('#image-view').classList.add('hidden');
@@ -125,6 +139,7 @@ async function openFile(path, { line } = {}) {
   applyReviewToEditor();
   applyDiagnostics();
   review.render();
+  outline.update();
   if (line) editor.gotoLine(line);
 }
 
@@ -132,6 +147,7 @@ async function reloadCurrentFromDisk() {
   const { content } = await api(`/file?path=${encodeURIComponent(state.file)}`);
   if (content === editor.getDoc()) { state.savedContent = content; state.dirty = false; return; }
   editor.replaceDocPreserving(content);
+  outline.update();
   state.savedContent = content;
   state.dirty = false;
   setSaveState('Saved');

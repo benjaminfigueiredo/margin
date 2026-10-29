@@ -7,6 +7,7 @@
   `git pull` or another editor in that window produced no reload and no "changed on disk" notice, and
   the next autosave overwrote it. Self-writes are now recognised by content hash: an event is ours only
   if the file on disk still holds exactly the bytes the UI saved.
+- Outline panel under the file tree: parts, chapters, sections (incl. starred forms), figures and tables of the open .tex file, parsed from the editor text so it follows unsaved edits and ignores comments. Click an entry to jump; the section around the cursor is highlighted.
 - Undo accept: an accepted suggestion's card now has an "Undo accept" button that puts the
   original text back (refused if the accepted text has been edited since) and reopens the
   suggestion. Author-only: Claude gets no MCP tool for it.
