@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Fix: every PDF reload after the first (after each compile) threw an error once the new PDF was
+  already on screen, and left the previous document and its pdf.js worker in memory. pdf.js 6
+  frees a document through its loading task; Margin still called the old method.
 - The PDF's text can now be selected and copied, and searched. Drag over the PDF to select
   (a double-click still jumps to the source; a double-click that turns into a drag selects
   instead). The new **Find in PDF** box in the PDF header, or ⌘/Ctrl+F while the PDF has focus,

@@ -374,11 +374,7 @@ const changes = createChanges($('#changes'), {
     editor.focus();
   },
   showPdf: async (url) => {
-    let ok;
-    // pdf.load() swaps the new document in and then calls old.destroy(), which pdfjs-dist 6 no longer has
-    // (it moved to loadingTask.destroy()), so on every reload after the first it throws once the new PDF is
-    // already on screen. Tolerate exactly that, so a diff PDF that did load is not reported as a failure.
-    try { ok = await pdf.load(url); } catch (e) { if (e instanceof TypeError && /destroy/.test(e.message) && pdf.loaded) ok = true; else throw e; }
+    const ok = await pdf.load(url);
     if (url === '/pdf') $('#pdf-empty').classList.toggle('hidden', ok || pdf.loaded);
     return ok;
   },

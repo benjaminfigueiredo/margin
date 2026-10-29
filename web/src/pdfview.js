@@ -37,7 +37,8 @@ export function createPdfView(scroller, pagesEl, { onInverse, onStatus }) {
     const task = pdfjsLib.getDocument({ url: `${url}?t=${Date.now()}`, isEvalSupported: false });
     let next;
     try { next = await task.promise; } catch (e) { console.warn('PDF load failed', e); return false; }
-    if (token !== loadToken) { next.destroy(); return false; }
+    // pdfjs-dist 6: a document is freed (with its worker) through its loading task.
+    if (token !== loadToken) { next.loadingTask.destroy(); return false; }
     const first = await next.getPage(1);
     const base = first.getViewport({ scale: 1 });
     const old = doc;
@@ -46,7 +47,7 @@ export function createPdfView(scroller, pagesEl, { onInverse, onStatus }) {
     scale = computeScale(base.width);
     await buildPages();
     restoreAnchor(anchor);
-    if (old) old.destroy();
+    if (old) old.loadingTask.destroy();
     if (findState.query) find(findState.raw, { keepCurrent: true }); // the new PDF may have other matches
     return true;
   }
