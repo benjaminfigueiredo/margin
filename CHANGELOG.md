@@ -5,6 +5,9 @@
 - Fix: on a branch that tracks nothing on Overleaf, the status bar showed no "to pull" count,
   which looked exactly like being up to date. It now says "not tracking Overleaf", and the
   tooltip explains how to get back to `master`.
+- The outline panel now takes only the height it needs (up to half the Files pane), so an
+  empty outline no longer squeezes the file tree. On a long paper, the word-count breakdown
+  keeps its column headings and the Paper total in view while the sections scroll.
 - Fix: a pull that conflicted reported success. `git pull --rebase --autostash` can
   fast-forward and then fail to reapply your stashed edits, leaving both versions in the
   file with `<<<<<<<` markers while git still exits 0 — and `behind`/`ahead` both read 0,

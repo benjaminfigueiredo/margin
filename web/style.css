@@ -106,13 +106,14 @@ button, select, textarea, input { font: inherit; color: inherit; }
 }
 
 .files { width: 190px; flex: none; background: var(--panel); border-right: 1px solid var(--line); }
-.tree { overflow: auto; padding: 6px 0; flex: 1 1 50%; min-height: 60px; }
-.outline { flex: 1 1 50%; min-height: 34px; display: flex; flex-direction: column; border-top: 1px solid var(--line); }
+.tree { overflow: auto; padding: 6px 0; flex: 1 1 0; min-height: 60px; }
+/* The outline takes only the height it needs, up to half the pane; the tree gets the rest. */
+.outline { flex: 0 1 auto; max-height: 50%; min-height: 34px; display: flex; flex-direction: column; border-top: 1px solid var(--line); }
 .outline.collapsed { flex: none; min-height: 0; }
 .outline.collapsed .outline-list { display: none; }
 .outline-head { justify-content: space-between; }
 .outline-toggle { border: 0; background: none; color: var(--muted); cursor: pointer; font-size: 11px; padding: 2px 4px; }
-.outline-list { overflow: auto; padding: 4px 0; flex: 1; }
+.outline-list { overflow: auto; padding: 4px 0; flex: 1; min-height: 0; }
 .outline-item { display: flex; align-items: center; gap: 6px; height: 24px; padding-right: 8px; cursor: pointer; color: var(--ink-2); white-space: nowrap; font-size: 12px; }
 .outline-item:hover { background: rgba(0,0,0,.04); }
 .outline-item .name { overflow: hidden; text-overflow: ellipsis; flex: 1; }
@@ -250,6 +251,9 @@ details summary { cursor: pointer; color: var(--ink-2); margin: 8px 0 4px; }
 .wc-panel thead th { color: var(--muted); font-size: 11px; }
 .wc-panel .num, .wc-panel thead th:not(:first-child) { text-align: right; font-variant-numeric: tabular-nums; }
 .wc-panel tfoot th, .wc-panel tfoot td { font-weight: 600; border-bottom: 0; }
+/* A long paper scrolls the table; keep the column heads and the Paper total in view. */
+.wc-panel thead th { position: sticky; top: -12px; background: var(--panel); }
+.wc-panel tfoot th, .wc-panel tfoot td { position: sticky; bottom: -12px; background: var(--panel); box-shadow: 0 -1px 0 var(--line); }
 #wc-sel { color: var(--ink); }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
 .dot.on { background: #3aa66e; }
