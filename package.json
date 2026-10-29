@@ -1,0 +1,45 @@
+{
+  "name": "margin-latex",
+  "version": "0.1.1",
+  "description": "Overleaf-style LaTeX editor where Claude reviews your manuscript",
+  "main": "server/app.js",
+  "scripts": {
+    "build": "node build.mjs",
+    "start": "node bin/margin.js",
+    "test": "node test/run.mjs"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "chokidar": "^3.6.0",
+    "express": "^5.3.0",
+    "ws": "^8.22.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@codemirror/commands": "^6.11.1",
+    "@codemirror/language": "^6.13.1",
+    "@codemirror/legacy-modes": "^6.5.5",
+    "@codemirror/search": "^6.7.2",
+    "@codemirror/state": "^6.7.6",
+    "@codemirror/view": "^6.43.15",
+    "codemirror": "^6.0.2",
+    "esbuild": "^0.28.2",
+    "pdfjs-dist": "^6.4.299"
+  },
+  "type": "module",
+  "bin": {
+    "margin": "bin/margin.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "files": [
+    "bin",
+    "server",
+    "public",
+    "templates",
+    "README.md"
+  ],
+  "private": true
+}

@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Margin</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%232f7a55'/%3E%3Cpath d='M9 23V9l7 9 7-9v14' fill='none' stroke='white' stroke-width='2.6' stroke-linejoin='round' stroke-linecap='round'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo" aria-hidden="true">M</span>
+      <span id="project-name" class="project"></span>
+      <span class="sep">/</span>
+      <span id="main-file" class="mainfile"></span>
+    </div>
+    <div class="top-actions">
+      <div class="compile-group">
+        <button id="btn-compile" class="btn compile" title="Recompile (Ctrl/⌘ + Enter)"><span class="spin" aria-hidden="true"></span><span class="label">Recompile</span></button>
+        <button id="btn-compile-menu" class="btn compile caret" title="Compiler settings" aria-label="Compiler settings">▾</button>
+        <div id="compile-menu" class="popover hidden">
+          <label>Main document <select id="set-main"></select></label>
+          <label>Compiler
+            <select id="set-engine">
+              <option value="pdflatex">pdfLaTeX</option>
+              <option value="xelatex">XeLaTeX</option>
+              <option value="lualatex">LuaLaTeX</option>
+            </select>
+          </label>
+          <label class="check"><input type="checkbox" id="set-auto"> Recompile automatically after edits</label>
+          <p class="fine">Match the compiler and TeX Live version set in your Overleaf project menu.</p>
+        </div>
+      </div>
+      <button id="btn-logs" class="btn top" title="Errors and warnings">Logs <span id="log-badge" class="badge hidden"></span></button>
+      <button id="btn-review" class="btn top active" title="Show/hide review panel">Review <span id="review-badge" class="badge hidden"></span></button>
+      <button id="btn-sync" class="btn top sync" title="Commit your changes, pull from Overleaf, push"><span class="spin" aria-hidden="true"></span>Sync with Overleaf</button>
+    </div>
+  </header>
+
+  <main class="workspace">
+    <aside class="pane files">
+      <div class="pane-head"><span>Files</span></div>
+      <div id="tree" class="tree"></div>
+    </aside>
+
+    <section class="pane editor-pane">
+      <div class="pane-head editor-head">
+        <span id="current-file" class="current-file"></span>
+        <span id="save-state" class="save-state"></span>
+        <span class="spacer"></span>
+        <button id="btn-comment" class="btn sm ghost" disabled title="Comment on selection (Ctrl/⌘ + Alt + C)">+ Comment</button>
+        <button id="btn-forward" class="btn sm ghost" title="Show this line in the PDF (Ctrl/⌘ + Alt + →)">→ PDF</button>
+      </div>
+      <div id="banner" class="banner hidden"></div>
+      <div id="editor" class="editor"></div>
+      <div id="image-view" class="image-view hidden"></div>
+    </section>
+
+    <aside id="review" class="pane review-pane">
+      <div class="pane-head">
+        <span>Review</span>
+        <span class="spacer"></span>
+        <div class="seg">
+          <button data-scope="file" class="on">This file</button>
+          <button data-scope="all">All</button>
+        </div>
+      </div>
+      <div class="review-sub">
+        <label class="check"><input type="checkbox" id="show-closed"> Show closed</label>
+        <div id="bulk" class="bulk"></div>
+      </div>
+      <div id="new-comment" class="new-comment hidden">
+        <div class="quote small"></div>
+        <textarea rows="3" placeholder="Comment — e.g. “Claude: is this claim supported by Fig. 2?”"></textarea>
+        <div class="row">
+          <button class="btn sm primary submit">Comment</button>
+          <button class="btn sm cancel">Cancel</button>
+          <span class="fine">⌘/Ctrl + Enter</span>
+        </div>
+      </div>
+      <div id="cards" class="cards"></div>
+    </aside>
+
+    <div id="splitter" class="splitter" role="separator" aria-orientation="vertical" title="Drag to resize"></div>
+
+    <section id="pdf-pane" class="pane pdf-pane">
+      <div class="pane-head pdf-head">
+        <button id="zoom-out" class="btn sm ghost" aria-label="Zoom out">−</button>
+        <button id="zoom-fit" class="btn sm ghost zoom-label"><span id="zoom-label">Fit</span></button>
+        <button id="zoom-in" class="btn sm ghost" aria-label="Zoom in">+</button>
+        <span class="spacer"></span>
+        <span id="page-label" class="page-label"></span>
+        <a class="btn sm ghost" href="/pdf" download title="Download PDF">Download</a>
+      </div>
+      <div id="pdf-scroll" class="pdf-scroll">
+        <div id="pdf-pages" class="pdf-pages"></div>
+        <div id="pdf-empty" class="pdf-empty"><p>No PDF yet.</p><p class="fine">Recompile to build it. Double-click the PDF to jump to the source.</p></div>
+      </div>
+      <div id="logs" class="logs hidden">
+        <div class="logs-head">
+          <strong>Compile log</strong>
+          <span class="spacer"></span>
+          <button id="btn-rawlog" class="btn sm ghost">Raw log</button>
+          <button class="btn sm ghost close" aria-label="Close">✕</button>
+        </div>
+        <div id="log-list" class="log-list"></div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="statusbar">
+    <span id="conn" class="dot off" title="Connecting…"></span>
+    <span id="git-status"></span>
+    <span class="spacer"></span>
+    <span id="compile-status"></span>
+  </footer>
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

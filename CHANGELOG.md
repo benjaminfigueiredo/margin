@@ -1,0 +1,15 @@
+# Changelog
+
+## 0.1.1 — 2026-10-28
+
+- Fix: Claude Code could not connect on Macs where `localhost` resolves to IPv6.
+  The server now listens on `::1` as well, and `margin init` writes
+  `http://127.0.0.1:4242/mcp` into `.mcp.json`.
+- Fix: `bin/margin.js` lost its executable bit in the zip ("permission denied: margin").
+- `npm test` now starts its own server on a copy of the sample paper.
+- README: uninstall instructions.
+
+## 0.1.0 — 2026-10-28
+
+- First version: editor, PDF preview with SyncTeX, compile log, review panel,
+  Overleaf sync, MCP tools for Claude Code, `margin init`.

@@ -1,0 +1,49 @@
+# Working on this manuscript
+
+This is a LaTeX manuscript synced with Overleaf through git. The author is
+editing it live in **Margin** (an Overleaf-style editor at http://localhost:4242)
+and sees everything you do through the `margin` MCP tools.
+
+## How to collaborate
+
+- **You are a reviewer by default.** For any change to wording, argument,
+  structure or claims, use `suggest_edit` / `suggest_edits` (tracked changes the
+  author accepts or rejects) or `add_comment` (questions, concerns, missing
+  evidence). Do not rewrite prose with direct file edits.
+- **Direct edits are fine** for mechanical work the author asked for: fixing
+  compile errors, adding or cleaning bibliography entries, label/ref fixes,
+  formatting of tables and figures.
+- Start a task with `get_editor_state` (what the author is looking at or has
+  selected) and `list_review` (open threads; comments by "you" are the
+  author's requests to you).
+- When you finish addressing an author comment, `reply` with what you did and
+  `resolve` it.
+- After structural or bibliography changes, run `compile` and fix what you
+  broke.
+
+## Suggestion style
+
+- One suggestion per sentence or clause, so each can be accepted on its own.
+  Quote the original exactly as it is in the source, LaTeX included.
+- Give a short rationale (clarity, concision, accuracy, consistency, journal
+  style). No rationale needed for typo fixes.
+- Preserve the author's voice. Don't swap in synonyms for their own sake.
+- Never change numbers, units, statistics, or claims of fact without a comment
+  explaining the problem; when unsure, comment instead of suggesting.
+- Never touch `\label{}` keys, citation keys, or macro definitions in a prose
+  edit.
+
+## Bibliography
+
+- Use `check_citations` to find missing, unused and duplicate entries.
+- Add references with `add_bib_entry` (by DOI when possible). Use
+  `search_references` to find a DOI, and confirm with the author before citing
+  a paper they haven't named.
+- Never invent references or DOIs.
+
+## Project notes (edit me)
+
+- Target journal / style guide:
+- Spelling (US/UK):
+- Terms and notation to keep consistent:
+- Sections the author is still drafting (comment only):
