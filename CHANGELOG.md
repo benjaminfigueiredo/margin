@@ -7,6 +7,9 @@
   overwritten), the last three versions are kept as `review.json.bak*`, an
   unreadable file is moved aside as `review.json.corrupt-*` instead of being
   replaced, and clearing closed items archives them to `.review/archive.json`.
+- Browser tests (Playwright, `npm run test:ui`) now cover the editor UI: boot, save,
+  compile log, accept/reject, comments, PDF → source and the review panel toggle.
+  `npm test` runs both the API and the UI suites.
 - New Claude tools `search_zotero` and `cite_from_zotero`: search the Zotero
   library open on this Mac and copy single entries into the paper's `.bib` under
   their Better BibTeX citation keys. Works with group libraries; falls back to

@@ -6,7 +6,9 @@
   "scripts": {
     "build": "node build.mjs",
     "start": "node bin/margin.js",
-    "test": "node test/run.mjs"
+    "test": "npm run test:api && npm run test:ui",
+    "test:api": "node test/run.mjs",
+    "test:ui": "playwright test"
   },
   "license": "MIT",
   "dependencies": {
@@ -23,6 +25,7 @@
     "@codemirror/search": "^6.7.2",
     "@codemirror/state": "^6.7.6",
     "@codemirror/view": "^6.43.15",
+    "@playwright/test": "^1.64.1",
     "codemirror": "^6.0.2",
     "esbuild": "^0.28.2",
     "pdfjs-dist": "^6.4.299"
