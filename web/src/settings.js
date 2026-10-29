@@ -1,18 +1,18 @@
 // Appearance settings in the top bar: theme (System / Light / Dark), editor font size and
 // layout (Standard, or Split screen for a short window above a Claude terminal).
-// These are personal, not project settings, so they live in this browser's localStorage
-// rather than in .review/config.json. The theme is also applied before first paint by a
-// one-line script in web/index.html, and so is the layout; keep keys, values and the
-// height threshold in sync with it.
+// These are personal, not project settings, so they are not in .review/config.json. They are
+// shared by all the author's papers through the server (/api/appearance, stored in Margin's
+// config folder, see server/config.js), and kept in this browser's localStorage too: that copy
+// paints the first frame instantly and is the fallback when the server has no shared settings.
+// Each paper runs on its own port, which is its own localStorage, hence the server copy.
+// The theme is also applied before first paint by a one-line script in web/index.html, and
+// so is the layout; keep keys, values and the height threshold in sync with it.
 import { $ } from './util.js';
+import { THEMES, SIZES, DEFAULT_SIZE, LAYOUTS } from '../../server/appearance.js';
 
 const THEME_KEY = 'margin:theme';
 const SIZE_KEY = 'margin:font-size';
-const THEMES = ['system', 'light', 'dark'];
-const SIZES = [12, 13, 14, 15, 16, 18, 20];
-const DEFAULT_SIZE = 14;
 const LAYOUT_KEY = 'margin:layout';
-const LAYOUTS = ['auto', 'standard', 'split'];
 // Auto switches to split screen at or below this window height: the standard chrome (44px top
 // bar, 34px pane heads, uncollapsed outline) leaves too little editor below it.
 export const SPLIT_MAX_HEIGHT = 660;
@@ -55,12 +55,40 @@ export function initSettings(editor) {
     if (split !== was) editor.remeasure();
   }
 
-  for (const b of menu.querySelectorAll('[data-theme-choice]')) {
-    b.addEventListener('click', () => { theme = b.dataset.themeChoice; write(THEME_KEY, theme); apply(); });
+  // ---- shared copy on the server. Never blocks booting: every failure leaves the local copy. ----
+  let shared = false, pulled = false, editedBeforePull = false;
+  const push = () => {
+    if (!shared) { if (!pulled) editedBeforePull = true; return; }
+    fetch('/api/appearance', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ theme, fontSize: size, layout }) }).catch(() => {});
+  };
+  async function pull() {
+    let r;
+    try {
+      const res = await fetch('/api/appearance', { cache: 'no-store' });
+      if (!res.ok) return; // this server keeps no shared settings: localStorage only
+      r = await res.json();
+    } catch { return; } finally { pulled = true; }
+    shared = true;
+    $('#settings-where').textContent = 'Shared by all your papers on this computer.';
+    // First time anywhere, or a change made while the request was out: this browser's choice wins.
+    if (!r.saved || editedBeforePull) { editedBeforePull = false; push(); return; }
+    const s = r.settings || {};
+    let changed = false;
+    if (THEMES.includes(s.theme) && s.theme !== theme) { theme = s.theme; write(THEME_KEY, theme); changed = true; }
+    if (SIZES.includes(s.fontSize) && s.fontSize !== size) { size = s.fontSize; write(SIZE_KEY, String(size)); changed = true; }
+    if (LAYOUTS.includes(s.layout) && s.layout !== layout) { layout = s.layout; write(LAYOUT_KEY, layout); changed = true; }
+    if (changed) apply();
   }
-  sizeSel.addEventListener('change', () => { size = Number(sizeSel.value); write(SIZE_KEY, String(size)); apply(); });
+  // Coming back to this tab after changing a setting in another paper picks the change up.
+  window.addEventListener('focus', () => pull());
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') pull(); });
+
+  for (const b of menu.querySelectorAll('[data-theme-choice]')) {
+    b.addEventListener('click', () => { theme = b.dataset.themeChoice; write(THEME_KEY, theme); apply(); push(); });
+  }
+  sizeSel.addEventListener('change', () => { size = Number(sizeSel.value); write(SIZE_KEY, String(size)); apply(); push(); });
   for (const b of menu.querySelectorAll('[data-layout-choice]')) {
-    b.addEventListener('click', () => { layout = b.dataset.layoutChoice; write(LAYOUT_KEY, layout); applyLayout(); });
+    b.addEventListener('click', () => { layout = b.dataset.layoutChoice; write(LAYOUT_KEY, layout); applyLayout(); push(); });
   }
   window.addEventListener('resize', () => { if (layout === 'auto') applyLayout(); });
   // Opening the outline by hand in split screen is a choice: don't fold it again on the next resize.
@@ -78,4 +106,5 @@ export function initSettings(editor) {
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') open(false); });
 
   apply();
+  pull();
 }

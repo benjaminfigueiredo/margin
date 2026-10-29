@@ -139,6 +139,9 @@ button, select, textarea, input { font: inherit; color: inherit; }
   display: grid; place-items: center; font-weight: 700; font-size: 13px; letter-spacing: -.5px;
 }
 .project { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Link back to the hub, shown only on a paper the hub started. */
+.hub-link { color: var(--top-ink); opacity: .75; text-decoration: none; font-size: 12px; white-space: nowrap; padding: 2px 7px; border: 1px solid rgba(255,255,255,.14); border-radius: 5px; }
+.hub-link:hover { opacity: 1; background: rgba(255,255,255,.08); border-color: rgba(255,255,255,.3); }
 .sep { opacity: .35; }
 .mainfile { opacity: .65; font-family: var(--mono); font-size: 12px; }
 .top-actions { display: flex; align-items: center; gap: 6px; }

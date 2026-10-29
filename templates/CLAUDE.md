@@ -1,7 +1,7 @@
 # Working on this manuscript
 
 This is a LaTeX manuscript synced with Overleaf through git. The author is
-editing it live in **Margin** (an Overleaf-style editor at http://localhost:4242)
+editing it live in **Margin** (an Overleaf-style editor running locally, on the port in `.mcp.json`)
 and sees everything you do through the `margin` MCP tools.
 
 ## How to collaborate

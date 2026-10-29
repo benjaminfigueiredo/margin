@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+- The hub: all your papers on one page. `margin hub` (or `margin` with no folder, run outside a
+  paper folder) opens a list of your papers with their state and when you last opened them.
+  **Open folder…** adds one (the native folder picker on macOS, a path field elsewhere); **Open**
+  starts it if needed and opens it in a new tab; **Stop**, **Remove** (from the list only; files
+  are never touched) and **Restart** after an error. Each paper runs as its own Margin server, so
+  one crashing does not take the others down, on a port it is given once (4243 and up) and keeps.
+  The hub keeps each paper's `.mcp.json` pointing at that port, so Claude Code in a paper folder
+  always talks to that paper, and says when an open Claude session must be restarted; a paper not
+  yet set up gets **Set up for Claude**. On macOS, **Claude terminal** opens Terminal in the paper
+  folder running `claude`. Papers stop with the hub, even if it is killed. The list lives in
+  Margin's settings folder (`~/Library/Application Support/margin` on macOS, `~/.config/margin`
+  elsewhere, or `MARGIN_CONFIG_DIR`), never in a paper. Programs that start the hub can wait for
+  the line `MARGIN_HUB_READY <url>` on stdout. `margin <folder>` and `margin init` are unchanged.
+- Theme, font size and layout (**Aa**) are now shared by all your papers on this computer, in
+  Margin's settings folder, instead of being remembered separately for each port.
+- `margin <folder>` warns when the folder's `.mcp.json` points Claude Code at a different port.
+- Fix: `margin` crashed right after starting on a computer with no browser opener (`xdg-open`
+  missing, as on a headless Linux server) unless `--no-open` was given.
 - Fix: every PDF reload after the first (after each compile) threw an error once the new PDF was
   already on screen, and left the previous document and its pdf.js worker in memory. pdf.js 6
   frees a document through its loading task; Margin still called the old method.

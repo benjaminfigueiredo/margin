@@ -628,6 +628,8 @@ async function boot() {
   state.project = await api('/project');
   document.title = `${state.project.name} — Margin`;
   $('#project-name').textContent = state.project.name;
+  // Started from the hub: a plain link back to it (another origin, so no requests to it from here).
+  if (state.project.hub) { $('#hub-link').href = state.project.hub; $('#hub-link').classList.remove('hidden'); }
   $('#main-file').textContent = state.project.main;
   $('#set-engine').value = state.project.settings.engine;
   $('#set-auto').checked = !!state.project.settings.autoCompile;

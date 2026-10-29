@@ -7,7 +7,7 @@
     "build": "node build.mjs",
     "start": "node bin/margin.js",
     "test": "npm run test:api && npm run test:ui",
-    "test:api": "node test/run.mjs",
+    "test:api": "node test/run.mjs && node test/hub.mjs",
     "test:ui": "playwright test"
   },
   "license": "MIT",

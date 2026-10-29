@@ -1,0 +1,52 @@
+/* The hub page (web/hub.html). Colours come only from the tokens in style.css, so light and dark
+   follow the paper UI. */
+body.hub { grid-template-rows: 44px 1fr; }
+.hub-sub { opacity: .65; }
+.hub-main { overflow: auto; padding: 18px 20px 40px; min-height: 0; }
+.hub-main > * { max-width: 980px; margin-left: auto; margin-right: auto; }
+
+.hub-add { display: grid; gap: 6px; padding: 12px 14px; margin-bottom: 14px; background: var(--paper); border: 1px solid var(--line-strong); border-radius: 8px; }
+.hub-add label { font-weight: 600; }
+.hub-add .row { flex-wrap: nowrap; }
+.hub-input { flex: 1; min-width: 0; padding: 5px 8px; font-family: var(--mono); font-size: 12.5px; background: var(--paper); border: 1px solid var(--line-strong); border-radius: 5px; }
+.hub-input:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
+.hub-error { margin: 0; padding: 6px 8px; border-radius: 5px; background: var(--danger-soft); color: var(--danger); white-space: pre-wrap; overflow-wrap: anywhere; }
+.hub-note { margin: 0 0 12px; padding: 7px 10px; border-radius: 6px; background: var(--warn-soft); color: var(--warn-ink); border: 1px solid var(--warn-line); }
+
+.papers { display: grid; gap: 8px; }
+.paper { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 16px; align-items: center; padding: 10px 14px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
+.paper.fresh { border-color: var(--accent); }
+.paper-main { min-width: 0; display: grid; gap: 2px; }
+.paper-title { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.paper-name { font-weight: 600; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.paper-path { font-family: var(--mono); font-size: 11.5px; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.paper-meta { color: var(--muted); font-size: 11.5px; display: flex; gap: 10px; flex-wrap: wrap; }
+.paper-actions { display: flex; gap: 6px; align-items: center; justify-content: flex-end; flex-wrap: wrap; }
+.paper-msg { grid-column: 1 / -1; margin: 0; padding: 6px 8px; border-radius: 5px; font-size: 12px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; display: flex; gap: 8px; align-items: flex-start; }
+.paper-msg span { flex: 1; }
+.paper-msg.error { background: var(--danger-soft); color: var(--danger); }
+.paper-msg.notice { background: var(--warn-soft); color: var(--warn-ink); border: 1px solid var(--warn-line); }
+.paper-msg .x { border: 0; background: none; color: inherit; cursor: pointer; padding: 0 4px; font-size: 14px; line-height: 1; opacity: .7; }
+.paper-msg .x:hover { opacity: 1; }
+
+.pill { display: inline-flex; align-items: center; gap: 5px; font-size: 10.5px; font-weight: 600; letter-spacing: .3px; text-transform: uppercase; padding: 1px 7px; border-radius: 9px; background: var(--gutter); color: var(--muted); border: 1px solid var(--line); flex: none; }
+.pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.pill.running { background: var(--accent-soft); color: var(--accent-ink); border-color: var(--accept-line); }
+.pill.starting { color: var(--warn); }
+.pill.starting::before { animation: pulse 1s ease-in-out infinite; }
+.pill.error { background: var(--danger-soft); color: var(--danger); border-color: var(--reject-line); }
+@keyframes pulse { 50% { opacity: .25; } }
+
+.hub-empty { text-align: center; color: var(--ink-2); padding: 40px 20px; line-height: 1.6; }
+.hub-empty p { margin: 4px auto; max-width: 520px; }
+
+/* /open/<id>: a new window that starts the paper, then becomes it. */
+.opening { margin-top: 60px; text-align: center; display: grid; gap: 10px; justify-items: center; color: var(--ink-2); }
+.opening h2 { margin: 0; font-size: 16px; color: var(--ink); }
+.opening .spin { display: inline-block; width: 18px; height: 18px; color: var(--accent); }
+.opening .hub-error { max-width: 640px; text-align: left; }
+
+@media (max-width: 720px) {
+  .paper { grid-template-columns: 1fr; }
+  .paper-actions { justify-content: flex-start; }
+}

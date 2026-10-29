@@ -97,6 +97,11 @@ cd my-paper && claude     # terminal 2: Claude Code, connected to Margin
 The first time, Claude Code asks you to trust the folder; check the connection
 with `/mcp` (you should see `margin` connected).
 
+Working on several papers? Start the **hub** instead (`margin hub`, see
+[Several papers: the hub](#several-papers-the-hub)): one page lists your papers
+and runs each one on its own port, so you don't need a terminal and a `--port`
+per paper.
+
 Things to say to Claude:
 
 - `/review Discussion, focus on concision and hedging`
@@ -122,7 +127,7 @@ In the editor:
 | Select and copy PDF text | drag over the PDF (a double-click also jumps to the source) |
 | Find in the PDF | the box in the PDF header, or ⌘/Ctrl + F with the PDF focused; Enter / Shift+Enter for next / previous, Esc to clear |
 | Compiler / main file / auto-recompile | ▾ next to Recompile |
-| Light / dark theme, editor font size, layout | **Aa** in the top bar (saved per browser) |
+| Light / dark theme, editor font size, layout | **Aa** in the top bar (shared by all your papers on this computer) |
 | New file / folder | **+** in the Files pane |
 | Rename, delete, reveal in Finder/Explorer | right-click a file or folder (or its **⋯**) |
 | Add a figure | drag an image or PDF onto the editor: it goes to `figures/` and a `figure` block is inserted |
@@ -130,6 +135,73 @@ In the editor:
 
 Use **Sync with Overleaf** when you want your accepted changes on Overleaf, and
 before starting a session to pull co-authors' edits.
+
+### Several papers: the hub
+
+```bash
+margin hub                # opens http://127.0.0.1:4242/ with the list of your papers
+```
+
+Running `margin` with no folder does the same when the current folder has no
+`.tex` file in it (in a paper folder it opens that paper, as before).
+
+- **Open folder…** adds a paper: on macOS it shows the usual folder picker,
+  elsewhere you type the path. It must be the folder that holds the paper's main
+  `.tex` file (not your home folder, not `/`).
+- **Open** starts the paper if needed and opens it in a new tab. Each paper runs
+  as its own Margin server, on a port it is given the first time (4243, 4244, …)
+  and keeps for good. A paper that crashes is marked **Error** with the reason and
+  a **Restart** button; the others carry on. **Stop** stops one paper;
+  **Remove** takes it off the list (its files are not touched).
+- **Claude Code stays on the right paper.** Claude finds Margin through the URL in
+  the paper's `.mcp.json`. The hub keeps that URL on the paper's own port: if it
+  has to change it (a paper set up with an older `margin init` points at 4242,
+  which is now the hub), it says so, and a Claude session already open in that
+  folder must be restarted (`/exit`, then `claude`). Nothing else in `.mcp.json`
+  is changed. A paper never set up for Claude gets a **Set up for Claude** button,
+  which runs `margin init` with the right port. On macOS, **Claude terminal**
+  opens Terminal in the paper folder and runs `claude` (the first time, macOS
+  asks whether Margin may control Terminal).
+- If a paper's port is taken (for example by `margin my-paper` still running in a
+  terminal), the hub says so instead of starting a second copy.
+- A paper opened from the hub has a **‹ Papers** link in its top bar.
+- Theme, font size and layout (**Aa**) follow you from paper to paper.
+- **Ctrl+C** in the hub's terminal stops the hub and every paper it started.
+  Papers never outlive the hub, even if it is killed.
+
+The list, the shared settings and each paper's server log live in Margin's own
+settings folder, never in a paper folder: `~/Library/Application Support/margin/`
+on macOS, `~/.config/margin/` elsewhere (or `$XDG_CONFIG_HOME/margin`; set
+`MARGIN_CONFIG_DIR` to use another folder). The only thing the hub writes in a
+paper folder is the margin entry in `.mcp.json` (and what `margin init` writes,
+when you press **Set up for Claude**), all of it kept out of git.
+
+`margin <folder>` still works on its own, on port 4242 or `--port`. Don't run it
+and the hub on the same paper at once; if `.mcp.json` names another port,
+`margin <folder>` warns that Claude will not reach it.
+
+#### For programs that start the hub (a native app, scripts)
+
+- Start: `margin hub [--port N] [--no-open]` (default port 4242). The process is
+  the hub; stop it with SIGTERM (or SIGINT), which stops every paper it started
+  and then exits with status 0.
+- Ready: once it is listening, the hub prints one line to stdout,
+  `MARGIN_HUB_READY http://127.0.0.1:<port>/`. Other output is for people. If the
+  port is taken it prints a message to stderr and exits with status 1 (the message
+  says when the port holds a hub already).
+- The page at `/` is the paper list. **Open** is a normal link with
+  `target="_blank"`: to `http://127.0.0.1:<paper-port>/` when the paper is
+  running, otherwise to the hub's `/open/<id>`, which starts the paper and then
+  navigates to the paper's URL. A paper's **‹ Papers** link is a plain link to
+  the hub's `/`.
+- The hub only answers on 127.0.0.1 and ::1, only to requests addressed to
+  `127.0.0.1`, `localhost` or `[::1]` on its port, and only to its own page (or to
+  requests with no `Origin` and no cross-site `Sec-Fetch-Site`, such as curl).
+  Pages from other sites and from the papers themselves are refused; only `/`
+  can be reached by a link from elsewhere, and no page can frame it.
+  `GET /api/hub` answers `{"hub": true, ...}`; `GET /api/papers` lists the papers
+  with their `state` (`stopped`, `starting`, `running`, `error`), `port`, `url`
+  and `pid`.
 
 ### What changed, and a diff PDF for resubmissions
 
@@ -298,8 +370,11 @@ always runs the code in this folder.
 
 ## Uninstall
 
-Margin runs only while `margin` is open in a terminal. It installs no
-background service and nothing system-wide except the `margin` command.
+Margin runs only while `margin` (or `margin hub`) is open in a terminal. It
+installs no background service and nothing system-wide except the `margin`
+command. Its settings folder (the hub's list of papers, the shared appearance
+settings and the papers' logs) is `~/Library/Application Support/margin/` on macOS
+and `~/.config/margin/` elsewhere; delete it to forget them.
 
 **Remove Margin from a paper** (run inside the paper folder):
 
@@ -336,8 +411,12 @@ separately if you want.
 ## Files
 
 ```
-bin/margin.js       CLI (margin, margin init)
+bin/margin.js       CLI (margin, margin init, margin hub)
 server/app.js       HTTP + WebSocket server, file watcher
+server/hub.js       the hub: list of papers, one Margin server per paper as a child process
+server/localhost.js localhost-only guards (Host, cross-site requests) shared by the paper server and the hub
+server/config.js    Margin's settings folder: shared appearance settings, atomic JSON writes
+server/macos.js     macOS folder picker and Claude terminal (osascript)
 server/mcp.js       Claude's tools (MCP over HTTP at /mcp)
 server/review.js    suggestion/comment store and text anchoring
 server/asks.js      "Ask Claude": hand-over to the Claude terminal, Claude activity
@@ -349,8 +428,9 @@ server/changes.js   Changes view: per-file hunks since the last sync / last comm
 server/latexdiff.js latexdiff PDF of the changes, built under .margin-build/diff/
 server/init.js      margin init
 templates/          CLAUDE.md, slash commands and the prompt hook installed by init
-web/                UI source (CodeMirror 6, pdf.js) → built into public/
+web/                UI source (CodeMirror 6, pdf.js) and the hub page → built into public/
 test/run.mjs        end-to-end test (npm test)
+test/hub.mjs        end-to-end test of the hub (npm test)
 CLAUDE.md           guide for Claude when working on Margin's code
 CHANGELOG.md        what changed in each version
 ```

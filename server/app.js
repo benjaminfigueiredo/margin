@@ -2,7 +2,6 @@
 // and a file watcher so edits from anywhere (Claude, git pull, another editor)
 // show up live. Binds to 127.0.0.1 only.
 import express from 'express';
-import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -24,12 +23,17 @@ import { mountResponseRoutes } from './responses.js';
 import { createClaudeLink } from './asks.js';
 import { changes as projectChanges, acceptedSince } from './changes.js';
 import * as latexdiff from './latexdiff.js';
+import { loopbackHosts, hostGuard, crossSiteGuard, upgradeAllowed, listenLoopback } from './localhost.js';
+import { mountAppearanceRoutes } from './config.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(here, '..', 'public');
 const UPLOAD_LIMIT = '20mb'; // same as the JSON limit for saving a file
 
-export async function startServer({ root, port = 4242, main, engine }) {
+// configDir: the author's Margin config folder (server/config.js). When given, appearance settings
+// (theme, font size, layout) are shared with every other paper through it; tests leave it out.
+// hubUrl: set when the hub started this server, for the link back to it in the top bar.
+export async function startServer({ root, port = 4242, main, engine, configDir, hubUrl }) {
   const project = new Project(root, { main });
   // CLAUDE.md: nothing Margin creates may reach Overleaf. git.sync() stages with
   // `git add -A`, so the local-only paths must be excluded even when `margin init`
@@ -47,26 +51,12 @@ export async function startServer({ root, port = 4242, main, engine }) {
   const state = { editor: null, lastCompile: null, compiling: null, diffing: null };
 
   const app = express();
-  const server = http.createServer(app);
   const wss = new WebSocketServer({ noServer: true });
 
-  const allowedHosts = new Set([`127.0.0.1:${port}`, `localhost:${port}`, `[::1]:${port}`]);
-  // Guard against DNS rebinding: only answer requests addressed to localhost.
-  app.use((req, res, next) => (allowedHosts.has(req.headers.host) ? next() : res.status(403).send('Forbidden host')));
-  // Guard against cross-site requests (CSRF). The Host check does not stop a page on another site
-  // from making the browser send a "simple" POST to 127.0.0.1 without a preflight, which would let
-  // any web page compile, pull, or worse. Browsers label such requests with Origin (every
-  // cross-origin fetch, and every POST) and Sec-Fetch-Site; refuse anything not from Margin's own
-  // page. Claude Code's MCP client and the prompt hook send neither, so they are unaffected.
-  // Plain GET navigations are not checked on Sec-Fetch-Site, so a link to Margin still opens it.
-  app.use((req, res, next) => {
-    const origin = req.headers.origin;
-    if (origin !== undefined && !allowedHosts.has(origin.replace(/^http:\/\//, ''))) return res.status(403).json({ error: 'Cross-site request refused' });
-    const site = req.headers['sec-fetch-site'];
-    const safe = req.method === 'GET' || req.method === 'HEAD';
-    if (!safe && site && site !== 'same-origin' && site !== 'none') return res.status(403).json({ error: 'Cross-site request refused' });
-    next();
-  });
+  // Host check and cross-site refusal (server/localhost.js), on HTTP and the WebSocket alike.
+  const allowedHosts = loopbackHosts(port);
+  app.use(hostGuard(allowedHosts));
+  app.use(crossSiteGuard(allowedHosts));
 
   const broadcast = (msg) => {
     const data = JSON.stringify(msg);
@@ -117,7 +107,10 @@ export async function startServer({ root, port = 4242, main, engine }) {
     catch (e) { res.status(e.status || 400).json({ error: e.message || String(e) }); }
   };
 
-  api.get('/project', handle(async () => ({ name: project.name, root: project.root, main: project.main, settings, git: await git.status(project), lastCompile: state.lastCompile ? summarize(state.lastCompile) : null })));
+  const hub = typeof hubUrl === 'string' && /^http:\/\/127\.0\.0\.1:\d+\/$/.test(hubUrl) ? hubUrl : null;
+  api.get('/project', handle(async () => ({ name: project.name, root: project.root, main: project.main, settings, git: await git.status(project), lastCompile: state.lastCompile ? summarize(state.lastCompile) : null, ...(hub ? { hub } : {}) })));
+  // Theme, font size and layout, shared across papers through the config folder (web/src/settings.js).
+  if (configDir) mountAppearanceRoutes(api, configDir, handle);
   api.put('/settings', handle(async (req) => {
     if (req.body.engine && ['pdflatex', 'xelatex', 'lualatex'].includes(req.body.engine)) settings.engine = req.body.engine;
     if (typeof req.body.autoCompile === 'boolean') settings.autoCompile = req.body.autoCompile;
@@ -253,12 +246,9 @@ export async function startServer({ root, port = 4242, main, engine }) {
 
   // ---------- WebSocket ----------
   const onUpgrade = (req, socket, head) => {
-    if (!allowedHosts.has(req.headers.host) || !req.url.startsWith('/ws')) { socket.destroy(); return; }
-    const origin = req.headers.origin;
-    if (origin !== undefined && !allowedHosts.has(origin.replace(/^http:\/\//, ''))) { socket.destroy(); return; }
+    if (!upgradeAllowed(req, allowedHosts) || !req.url.startsWith('/ws')) { socket.destroy(); return; }
     wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req));
   };
-  server.on('upgrade', onUpgrade);
   wss.on('connection', (ws) => ws.send(JSON.stringify({ type: 'hello', project: project.name })));
 
   // ---------- File watcher ----------
@@ -331,12 +321,8 @@ export async function startServer({ root, port = 4242, main, engine }) {
     gitTimer = setInterval(gitPoll, GIT_POLL_MS);
   }
 
-  await new Promise((resolve, reject) => { server.once('error', reject); server.listen(port, '127.0.0.1', resolve); });
-  // On macOS "localhost" often resolves to the IPv6 address ::1 first, so answer there too.
-  // Best effort: machines without IPv6 just keep the IPv4 listener.
-  const server6 = http.createServer(app);
-  server6.on('upgrade', onUpgrade);
-  await new Promise((resolve) => { server6.once('error', () => resolve()); server6.listen(port, '::1', resolve); });
+  // 127.0.0.1, and ::1 as well when the machine has IPv6 (macOS may resolve localhost to it first).
+  const { server, server6 } = await listenLoopback(app, port, { onUpgrade });
   return { server, project, review, gitPoll, gitTimerActive: () => gitTimer !== null, close: async () => { clearInterval(gitTimer); claude.close(); gitTimer = null; await watcher.close(); wss.close(); server.close(); server6.close(); } };
 }
 
