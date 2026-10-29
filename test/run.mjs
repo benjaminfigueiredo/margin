@@ -11,6 +11,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { startServer } from '../server/app.js';
+import { Project } from '../server/project.js';
 
 let base = process.argv[2];
 let running = null;
@@ -170,6 +171,57 @@ if (running) {
   r = await call('search_zotero', { query: 'anything' });
   console.log(r.text); assert.ok(r.error); assert.match(r.text, /Zotero is not running/);
 }
+
+// Path safety: Project.abs() is the only gate between client paths and the disk,
+// and Project.write() adds the ignored-folder check. Uses its own temp folders so
+// it runs the same whether the server is in-process or external.
+step('Project.abs: traversal rejected, normal paths normalised');
+const safeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'margin-pathsafe-'));
+const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), 'margin-outside-'));
+fs.writeFileSync(path.join(outsideDir, 'secret.tex'), 'SECRET');
+const proj = new Project(safeDir);
+for (const bad of ['../outside.tex', 'sections/../../outside.tex', '', null, 'a/../../..', `../${path.basename(safeDir)}-sibling/x.tex`]) {
+  assert.throws(() => proj.abs(bad), /path is required|escapes project/, `should reject ${JSON.stringify(bad)}`);
+}
+assert.equal(proj.abs('main.tex'), path.join(safeDir, 'main.tex'));
+assert.equal(proj.abs('./main.tex'), path.join(safeDir, 'main.tex'));
+assert.equal(proj.abs('sections/intro.tex'), path.join(safeDir, 'sections', 'intro.tex'));
+assert.equal(proj.abs('sections\\intro.tex'), path.join(safeDir, 'sections', 'intro.tex'));
+assert.equal(proj.abs('/main.tex'), path.join(safeDir, 'main.tex'));
+// Leading slash is stripped, so '/etc/passwd' is NOT rejected: it maps to <root>/etc/passwd.
+// Confined to the paper folder, which is what matters here.
+assert.equal(proj.abs('/etc/passwd'), path.join(safeDir, 'etc', 'passwd'));
+
+step('HTTP API refuses traversal paths and writes nothing');
+const paperRoot = (await rest('/project')).root;
+const probe = path.join(path.dirname(paperRoot), 'margin-escape-probe.tex');
+const q = (p) => `?path=${encodeURIComponent(p)}`;
+let res = await fetch(`${base}/api/file${q('../package.json')}`);
+assert.equal(res.status, 400); assert.match((await res.json()).error, /escapes project/);
+res = await fetch(`${base}/api/file${q('../margin-escape-probe.tex')}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ content: 'PWNED' }) });
+assert.equal(res.status, 400); assert.match((await res.json()).error, /escapes project/);
+res = await fetch(`${base}/api/file${q('sections/../../margin-escape-probe.tex')}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ content: 'PWNED' }) });
+assert.equal(res.status, 400);
+assert.equal(fs.existsSync(probe), false, 'PUT through traversal must not create a file outside the paper');
+res = await fetch(`${base}/api/raw${q('../package.json')}`);
+assert.equal(res.status, 400); assert.match(await res.text(), /escapes project/);
+
+step('Project.write refuses ignored folders');
+for (const bad of ['.review/x', '.git/config', '.claude/settings.local.json']) {
+  assert.throws(() => proj.write(bad, 'x'), /ignored folder/, `should refuse ${bad}`);
+}
+assert.equal(fs.existsSync(path.join(safeDir, '.review')), false);
+assert.equal(fs.existsSync(path.join(safeDir, '.git')), false);
+
+step('symlink inside the paper pointing outside');
+// Project.abs() is lexical and does not resolve symlinks, so write() follows the link
+// and writes outside the paper folder. Allowed today; not changed in this task.
+// This assertion documents that gap. If it starts failing, the behaviour changed on purpose.
+fs.symlinkSync(path.join(outsideDir, 'secret.tex'), path.join(safeDir, 'link.tex'));
+proj.write('link.tex', 'OVERWRITTEN');
+assert.equal(fs.readFileSync(path.join(outsideDir, 'secret.tex'), 'utf8'), 'OVERWRITTEN');
+fs.rmSync(safeDir, { recursive: true, force: true });
+fs.rmSync(outsideDir, { recursive: true, force: true });
 
 console.log('\nAll checks passed.');
 await client.close();
