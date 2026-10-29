@@ -6,6 +6,7 @@ import { initWordCount } from './wordcount.js';
 import { createOutline } from './outline.js';
 import { initSettings } from './settings.js';
 import { createFiles } from './files.js';
+import { createSearch } from './search.js';
 
 const state = {
   project: null,
@@ -303,6 +304,27 @@ $('#zoom-in').addEventListener('click', async () => { await pdf.zoomIn(); $('#zo
 $('#zoom-out').addEventListener('click', async () => { await pdf.zoomOut(); $('#zoom-label').textContent = pdf.zoomLabel; });
 $('#zoom-fit').addEventListener('click', async () => { await pdf.setZoom('fit'); $('#zoom-label').textContent = pdf.zoomLabel; });
 
+// ---------- find in project ----------
+const search = createSearch($('#search'), {
+  saveIfDirty: () => (state.dirty ? save() : Promise.resolve()),
+  getSelection: () => { const s = selectionInfo(editor.view.state).selection; return s && s.fromLine === s.toLine ? s.text : ''; },
+  onOpen: () => showLogs(false),
+  onJump: async (file, line, column, length) => {
+    if (file !== state.file) await openFile(file);
+    const doc = editor.view.state.doc;
+    const l = doc.line(Math.min(Math.max(1, line), doc.lines));
+    const from = Math.min(l.from + column - 1, l.to);
+    editor.gotoRange(from, Math.min(from + length, l.to));
+    editor.focus();
+  },
+  // The server wrote these files; show the new text in the editor and let the cards re-anchor.
+  onReplaced: async (files) => {
+    if (state.file && files.includes(state.file) && !state.dirty) await reloadCurrentFromDisk().catch(() => {});
+    await refreshReview();
+  },
+});
+$('#btn-search').addEventListener('click', () => search.toggle());
+
 // ---------- compile ----------
 async function compile() {
   if (state.dirty) await save();
@@ -368,6 +390,7 @@ function applyDiagnostics() {
 
 function showLogs(on) {
   const open = on ?? $('#logs').classList.contains('hidden');
+  if (open) search.close();
   $('#logs').classList.toggle('hidden', !open);
   $('#btn-logs').classList.toggle('active', open);
 }
@@ -520,6 +543,7 @@ function connect() {
       case 'tree-changed': await loadTree(); refreshGit(); break;
       case 'file-changed':
         refreshGit();
+        if (msg.external) search.refreshSoon();
         if (msg.path === state.file && msg.external) {
           if (!state.dirty) await reloadCurrentFromDisk();
           else showBanner(`${msg.path} changed on disk (Claude or git).`, [['Load disk version', () => reloadCurrentFromDisk()], ['Keep mine', () => { hideBanner(); save(); }]]);

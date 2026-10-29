@@ -19,6 +19,7 @@ import { checkCitations } from './bib.js';
 import { buildMcpServer } from './mcp.js';
 import { ensureLocalOnlyExcluded } from './init.js';
 import { countProject } from './wordcount.js';
+import * as projectSearch from './search.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(here, '..', 'public');
@@ -186,6 +187,13 @@ export async function startServer({ root, port = 4242, main, engine }) {
   api.post('/git/sync', handle(async (req) => { const r = await git.sync(project, { message: req.body.message || undefined }); broadcast({ type: 'tree-changed' }); return r; }));
   api.post('/git/pull', handle(async () => { const r = await git.pull(project); broadcast({ type: 'tree-changed' }); return r; }));
   api.get('/wordcount', handle(async () => countProject(project.main, (rel) => project.read(rel))));
+  api.get('/search', handle(async (req) => projectSearch.search(project, { q: req.query.q, regex: req.query.regex === '1', caseSensitive: req.query.case === '1', whole: req.query.whole === '1' })));
+  api.post('/replace', handle(async (req) => {
+    const r = projectSearch.replace(project, review, req.body || {});
+    // Cards quoting replaced text re-anchor or flag themselves ("text changed"); they are not rewritten.
+    if (!r.dryRun && r.replaced) broadcast({ type: 'review-changed' });
+    return r;
+  }));
   api.get('/citations', handle(async () => checkCitations(project)));
 
   // Errors from the body parsers (an oversized upload, malformed JSON) as JSON, like every other error here.

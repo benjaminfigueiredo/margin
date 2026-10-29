@@ -17,6 +17,13 @@
   and uploading, and refuses absolute paths too. An oversized upload or malformed JSON now
   gets a JSON error instead of an HTML page. The Main document list in the compile menu now
   follows files you add or rename.
+- Find and replace across the whole project (**Find** in the top bar, or Ctrl/⌘+Shift+F). Plain
+  text or regular expression, match case, whole word. Results are grouped by file with line
+  context; click one to jump to it. Replace all (after a confirmation naming the files and
+  match count), replace in one file, or replace a single match; unsaved edits in the editor are
+  saved first. If open suggestions or comments quote text a replace would change, the
+  confirmation says how many; their cards are then flagged "text changed" rather than rewritten.
+
 - Dark theme. Margin follows your system's light/dark setting; **Aa** in the top bar
   forces Light or Dark and sets the editor font size. Both are saved in this browser, not
   in the paper. The editor's syntax colours, suggestion and comment highlights, review

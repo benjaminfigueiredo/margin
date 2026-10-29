@@ -651,6 +651,104 @@ step('word count: totals, per section, comments/math ignored, \\input followed')
   await put('main.tex', ex('main.tex'));
 }
 
+step('project search and replace: literal, regex, case, whole word, 400s, cap, listed files only');
+{
+  const q = (o) => rest(`/search?${new URLSearchParams(o)}`);
+  const put = (p, content) => rest(`/file?path=${encodeURIComponent(p)}`, { method: 'PUT', body: { content } });
+  const readP = (p) => fs.readFileSync(path.join(tmp, 'paper', p), 'utf8');
+  const post = (body) => rest('/replace', { method: 'POST', body });
+  const count = (text, re) => (text.match(re) || []).length;
+
+  // literal search on the sample paper, counted independently from the files on disk
+  const textPaths = (await rest('/tree')).filter((e) => e.type === 'file' && e.text).map((e) => e.path);
+  const expected = textPaths.map((p) => [p, count(readP(p), /heatwave/gi)]).filter(([, n]) => n);
+  let s = await q({ q: 'heatwave' });
+  assert.equal(s.total, expected.reduce((n, [, c]) => n + c, 0));
+  assert.deepEqual(s.files.map((f) => [f.path, f.count]).sort(), expected.sort());
+  assert.equal(s.truncated, false);
+  const first = s.files.find((f) => f.path === 'sections/intro.tex').matches[0];
+  const introText = readP('sections/intro.tex');
+  assert.equal(introText.slice(first.from, first.to).toLowerCase(), 'heatwave');
+  assert.equal(introText.split('\n')[first.line - 1].slice(first.column - 1, first.column - 1 + first.length).toLowerCase(), 'heatwave');
+  assert.equal(first.text, introText.split('\n')[first.line - 1]);
+
+  // case sensitivity, whole words, regex metacharacters taken literally
+  assert.equal((await q({ q: 'HEATWAVE' })).total, s.total, 'case-insensitive by default');
+  assert.equal((await q({ q: 'HEATWAVE', case: '1' })).total, 0);
+  assert.equal((await q({ q: 'Marine', case: '1' })).total, textPaths.reduce((n, p) => n + count(readP(p), /Marine/g), 0));
+  assert.equal((await q({ q: 'heatwave', whole: '1' })).total, expected.reduce((n, [p]) => n + count(readP(p), /(?<!\w)heatwave(?!\w)/gi), 0));
+  assert.equal((await q({ q: '\\citep{' })).total, count(readP('sections/intro.tex'), /\\citep\{/g), 'literal mode escapes regex syntax');
+  assert.equal((await q({ q: '\\\\cite[pt]\\{', regex: '1' })).total, count(readP('sections/intro.tex'), /\\cite[pt]\{/g));
+
+  // invalid regex and empty query are 400s carrying the message, not 500s
+  for (const params of [{ q: '(unclosed', regex: '1' }, { q: '' }, {}]) {
+    const res = await fetch(`${base}/api/search?${new URLSearchParams(params)}`);
+    assert.equal(res.status, 400);
+    assert.ok((await res.json()).error);
+  }
+  assert.match((await q({ q: '[a-', regex: '1' })).error, /Invalid regular expression/);
+
+  // replace needs an explicit target, an in-project text file, and a valid regex
+  assert.match((await post({ q: 'heatwave', replacement: 'X' })).error, /files or matches/);
+  assert.match((await post({ q: 'heatwave', replacement: 'X', files: ['../outside.tex'] })).error, /escapes project/);
+  assert.match((await post({ q: '(', regex: true, replacement: 'X', files: ['main.tex'] })).error, /Invalid regular expression/);
+  assert.match((await post({ q: 'a', files: ['main.tex'] })).error, /replacement is required/);
+
+  // scratch files: replace changes only the listed files, only the named matches
+  await put('scratch-a.tex', 'zebra one. Zebra two. zebras three. zebra four.\n');
+  await put('scratch-b.tex', 'zebra in the other file.\n');
+  const dry = await post({ q: 'zebra', replacement: 'okapi', files: ['scratch-a.tex'], dryRun: true });
+  assert.equal(dry.replaced, 4); assert.equal(readP('scratch-a.tex').includes('okapi'), false, 'dry run writes nothing');
+  let r = await post({ q: 'zebra', replacement: 'okapi', files: ['scratch-a.tex'] });
+  assert.deepEqual(r.files, [{ path: 'scratch-a.tex', replaced: 4 }]);
+  assert.equal(readP('scratch-a.tex'), 'okapi one. okapi two. okapis three. okapi four.\n');
+  assert.equal(readP('scratch-b.tex'), 'zebra in the other file.\n', 'unlisted file untouched');
+  assert.equal(readP('sections/intro.tex'), introText);
+
+  // single match by offset; a stale offset replaces nothing
+  const one = (await q({ q: 'okapi', case: '1', whole: '1' })).files.find((f) => f.path === 'scratch-a.tex').matches;
+  assert.equal(one.length, 3);
+  r = await post({ q: 'okapi', whole: true, replacement: 'gnu', matches: [{ file: 'scratch-a.tex', from: one[1].from, to: one[1].to }] });
+  assert.equal(r.replaced, 1);
+  assert.equal(readP('scratch-a.tex'), 'okapi one. gnu two. okapis three. okapi four.\n');
+  r = await post({ q: 'okapi', replacement: 'gnu', matches: [{ file: 'scratch-a.tex', from: one[1].from, to: one[1].to }] });
+  assert.equal(r.replaced, 0, 'text no longer matches at that offset');
+
+  // regex mode expands $1; literal mode keeps "$1" as typed
+  await put('scratch-a.tex', 'fig 3 and fig 12\n');
+  await post({ q: 'fig (\\d+)', regex: true, replacement: 'Fig.~$1', files: ['scratch-a.tex'] });
+  assert.equal(readP('scratch-a.tex'), 'Fig.~3 and Fig.~12\n');
+  await post({ q: 'Fig.~3', replacement: '$1', files: ['scratch-a.tex'] });
+  assert.equal(readP('scratch-a.tex'), '$1 and Fig.~12\n');
+
+  // the match cap is reported, and counts stay exact beyond it
+  await put('scratch-b.tex', 'x '.repeat(2500) + '\n');
+  s = await q({ q: 'x', whole: '1' });
+  const b = s.files.find((f) => f.path === 'scratch-b.tex');
+  assert.equal(s.truncated, true); assert.equal(s.shown, 2000); assert.equal(s.limit, 2000);
+  assert.equal(b.count, 2500); assert.ok(s.total >= 2500);
+  assert.ok(s.files.reduce((n, f) => n + f.matches.length, 0) <= 2000);
+
+  // replacing text quoted by an open suggestion / comment: warned about, then orphaned, store intact
+  await put('scratch-a.tex', 'The quick brown fox jumps over the lazy dog. A second sentence stays put.\n');
+  const sug = await rest('/review/suggest', { method: 'POST', body: { file: 'scratch-a.tex', original: 'quick brown fox', replacement: 'swift fox' } });
+  const com = await rest('/review/comment', { method: 'POST', body: { file: 'scratch-a.tex', quote: 'second sentence', comment: 'fine' } });
+  assert.ok(sug.id && com.id);
+  const warn = await post({ q: 'brown', replacement: 'red', files: ['scratch-a.tex'], dryRun: true });
+  assert.equal(warn.reviewAffected, 1); assert.equal(warn.reviewItems[0].id, sug.id);
+  assert.equal((await post({ q: 'dog', replacement: 'cat', files: ['scratch-a.tex'], dryRun: true })).reviewAffected, 0);
+  r = await post({ q: 'brown', replacement: 'red', files: ['scratch-a.tex'] });
+  assert.equal(r.reviewAffected, 1);
+  const list = await rest('/review?status=open');
+  assert.ok(Array.isArray(list), 'the review store is still readable');
+  assert.equal(list.find((i) => i.id === sug.id).orphaned, true, 'the suggestion that quoted replaced text is orphaned');
+  assert.equal(list.find((i) => i.id === com.id).orphaned, false, 'an untouched comment stays anchored');
+  assert.match((await rest(`/review/${sug.id}/accept`, { method: 'POST', body: {} })).error, /no longer in the file/);
+  for (const id of [sug.id, com.id]) await rest(`/review/${id}`, { method: 'DELETE' });
+
+  for (const f of ['scratch-a.tex', 'scratch-b.tex']) fs.rmSync(path.join(tmp, 'paper', f), { force: true });
+}
+
 step('watcher: self-write suppression compares content, not time');
 if (running) {
   const { default: WebSocket } = await import('ws');
