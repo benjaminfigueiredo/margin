@@ -113,8 +113,11 @@
     <span id="conn" class="dot off" title="Connecting…"></span>
     <span id="git-status"></span>
     <span class="spacer"></span>
+    <span id="wc-sel" class="hidden"></span>
+    <button id="wc-btn" class="wc-btn" title="Word count" aria-expanded="false">– words</button>
     <span id="compile-status"></span>
   </footer>
+  <div id="wc-panel" class="wc-panel hidden" role="dialog" aria-label="Word count"></div>
   <div id="toasts" class="toasts" aria-live="polite"></div>
   <script type="module" src="/app.js"></script>
 </body>

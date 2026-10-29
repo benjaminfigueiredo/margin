@@ -5,6 +5,8 @@
 - Undo accept: an accepted suggestion's card now has an "Undo accept" button that puts the
   original text back (refused if the accepted text has been edited since) and reopens the
   suggestion. Author-only: Claude gets no MCP tool for it.
+- Word count: the status bar shows the paper's word count (following `\input`/`\include`; excludes comments, math, tables and the preamble); click it for a per-section breakdown with caption and footnote subtotals. Selecting text shows its count live. `GET /api/wordcount`.
+
 - Review store safety: `.review/review.json` is now version-checked and migrated (a
   file from a newer Margin makes startup fail with a clear message instead of being
   overwritten), the last three versions are kept as `review.json.bak*`, an

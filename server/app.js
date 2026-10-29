@@ -15,6 +15,7 @@ import { compile, forwardSearch, inverseSearch } from './compile.js';
 import * as git from './git.js';
 import { checkCitations } from './bib.js';
 import { buildMcpServer } from './mcp.js';
+import { countProject } from './wordcount.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(here, '..', 'public');
@@ -129,6 +130,7 @@ export async function startServer({ root, port = 4242, main, engine }) {
   api.get('/git/status', handle(async () => git.status(project)));
   api.post('/git/sync', handle(async (req) => { const r = await git.sync(project, { message: req.body.message || undefined }); broadcast({ type: 'tree-changed' }); return r; }));
   api.post('/git/pull', handle(async () => git.pull(project)));
+  api.get('/wordcount', handle(async () => countProject(project.main, (rel) => project.read(rel))));
   api.get('/citations', handle(async () => checkCitations(project)));
 
   app.use('/api', api);

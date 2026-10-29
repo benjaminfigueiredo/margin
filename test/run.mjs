@@ -398,6 +398,39 @@ step('undo accept (unaccept): deletion, reverse order, edit elsewhere, duplicate
   await rest(`/file?path=${F}`, { method: 'DELETE' }).catch(() => {});
 }
 
+step('word count: totals, per section, comments/math ignored, \\input followed');
+{
+  const ex = (p) => fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'examples', 'sample-paper', p), 'utf8');
+  const put = (p, content) => rest(`/file?path=${encodeURIComponent(p)}`, { method: 'PUT', body: { content } });
+  // Earlier checks edited the paper: start from the pristine sample.
+  for (const p of ['main.tex', 'sections/intro.tex', 'sections/methods.tex']) await put(p, ex(p));
+  const wc = await rest('/wordcount');
+  assert.equal(wc.total, 196);
+  assert.deepEqual(wc.sections.map((s) => [s.title, s.words]), [['Abstract', 49], ['Introduction', 105], ['Methods', 42]]);
+  assert.equal(wc.sections[1].file, 'sections/intro.tex');
+  assert.deepEqual(wc.missing, []);
+  // a comment and display math change nothing; an escaped \% does not start a comment
+  const methods = ex('sections/methods.tex');
+  await put('sections/methods.tex', methods + '% a long commented out sentence that must not count\n\\begin{align*} a &= b \\\\ c &= d \\end{align*}\n\\[ x^2 \\]\n');
+  const wcMath = await rest('/wordcount');
+  assert.equal(wcMath.total, 196);
+  assert.equal(wcMath.sections[2].words, 42);
+  await put('sections/methods.tex', methods + 'An aside \\% with escaped percent.\n');
+  assert.equal((await rest('/wordcount')).total, 201);
+  // captions and footnotes are subtotals, reported separately from words
+  await put('sections/methods.tex', methods + '\\begin{figure}\\includegraphics{x.png}\\caption{Three words here.}\\end{figure}\nText\\footnote{Two words.}\n');
+  const wcCap = await rest('/wordcount');
+  assert.deepEqual([wcCap.words, wcCap.captions, wcCap.footnotes, wcCap.total], [197, 3, 2, 202]);
+  // \input of a new section file with 10 words (extension optional); an include cycle is harmless
+  await put('sections/methods.tex', methods);
+  await put('sections/new.tex', 'one two three four five six seven eight nine ten \\input{main}\n');
+  await put('main.tex', ex('main.tex').replace('\\input{sections/methods}', '\\input{sections/methods}\n\\input{sections/new}'));
+  const wcInput = await rest('/wordcount');
+  assert.equal(wcInput.total, 206);
+  assert.ok(wcInput.files.includes('sections/new.tex'));
+  await put('main.tex', ex('main.tex'));
+}
+
 console.log('\nAll checks passed.');
 await client.close();
 if (running) { await running.close(); fs.rmSync(tmp, { recursive: true, force: true }); }

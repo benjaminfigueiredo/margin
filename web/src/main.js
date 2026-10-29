@@ -2,6 +2,7 @@ import { api, $, $$, h, debounce, toast } from './util.js';
 import { createEditor, selectionInfo } from './editor.js';
 import { createPdfView } from './pdfview.js';
 import { createReviewPanel } from './review.js';
+import { initWordCount } from './wordcount.js';
 
 const state = {
   project: null,
@@ -26,6 +27,8 @@ const editor = createEditor($('#editor'), {
     { key: 'Mod-Alt-c', run: () => { openCommentBox(); return true; } },
   ],
 });
+
+initWordCount(editor);
 
 function setSaveState(t) { $('#save-state').textContent = t; }
 
