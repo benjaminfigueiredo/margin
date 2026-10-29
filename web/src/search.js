@@ -47,6 +47,9 @@ export function createSearch(root, { saveIfDirty, onJump, onReplaced, getSelecti
     }
   }
   const runSoon = debounce(run, 250);
+  // A background refresh (a file changed on disk) must not throw away a confirmation the author
+  // opened in the meantime, so it checks for one when it fires, not when it is scheduled.
+  const refreshLater = debounce(() => { if (isOpen() && qInput.value && !pending) run(); }, 250);
 
   function hitRow(file, m) {
     const lead = m.text.length - m.text.trimStart().length;
@@ -155,6 +158,6 @@ export function createSearch(root, { saveIfDirty, onJump, onReplaced, getSelecti
     open, close, isOpen,
     toggle() { if (isOpen()) close(); else open(); },
     // Files changed on disk (Claude, git, another editor): keep the visible results honest.
-    refreshSoon() { if (isOpen() && qInput.value && !pending) runSoon(); },
+    refreshSoon() { refreshLater(); },
   };
 }
