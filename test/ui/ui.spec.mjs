@@ -25,8 +25,12 @@ test('boot: tree, editor, connection dot, first PDF page', async ({ page }) => {
   await expect(page.locator('#conn')).toHaveClass(/\bon\b/);
   const canvas = page.locator('#pdf-pages .pdf-page[data-page="1"] canvas');
   await expect(canvas).toBeVisible();
-  await expect.poll(async () => (await canvas.boundingBox())?.width ?? 0).toBeGreaterThan(0);
-  expect((await canvas.boundingBox()).height).toBeGreaterThan(0);
+  // The PDF pane replaces every page element after each compile (pdfview buildPages),
+  // so read width and height in one poll instead of two separate measurements.
+  await expect.poll(async () => {
+    const box = await canvas.boundingBox();
+    return Math.min(box?.width ?? 0, box?.height ?? 0);
+  }).toBeGreaterThan(0);
 });
 
 test('edit and save: Unsaved then Saved, content reaches disk', async ({ page, margin }) => {
@@ -136,11 +140,15 @@ test('PDF to source: double-click on page 1 jumps to the source line', async ({ 
   await expect(page.locator('#current-file')).toHaveText('main.tex');
   const pageEl = page.locator('#pdf-pages .pdf-page[data-page="1"]');
   await expect(pageEl.locator('canvas')).toBeVisible();
-  await pageEl.scrollIntoViewIfNeeded();
-  // Page width in CSS px over the paper width in pt (US letter, the pdfLaTeX default) gives the scale.
-  const scale = (await pageEl.boundingBox()).width / 612;
-  await pageEl.dblclick({ position: { x: (fwd.h + 5) * scale, y: (fwd.v - 2) * scale } });
-  await expect(page.locator('#current-file')).toHaveText('sections/methods.tex');
+  // A compile makes pdfview's buildPages() call replaceChildren(), so this node can
+  // detach between being measured and being clicked. Measure, click and check the jump
+  // as one retried step. Page width in CSS px over the paper width in pt (US letter,
+  // the pdfLaTeX default) gives the scale.
+  await expect(async () => {
+    const scale = (await pageEl.boundingBox()).width / 612;
+    await pageEl.dblclick({ position: { x: (fwd.h + 5) * scale, y: (fwd.v - 2) * scale } });
+    await expect(page.locator('#current-file')).toHaveText('sections/methods.tex', { timeout: 3_000 });
+  }).toPass({ timeout: 20_000 });
   await expect(page.locator('#editor .cm-lineNumbers .cm-activeLineGutter')).toHaveText('5');
 });
 
