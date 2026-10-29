@@ -18,6 +18,7 @@ Overleaf ⇄ git ⇄ your local repo ⇄ Margin server ⇄ browser UI
 - **Ask Claude**: select text, press **Ask Claude**, say what you want; your Claude terminal picks it up with your next message, and the card shows *waiting → Claude is on it → answered*, linked to the suggestions Claude made for it.
 - **Split screen**: a compact layout for a short browser window with your Claude terminal underneath.
 - **Sync with Overleaf**: one button commits, pulls Overleaf's changes (rebase), and pushes.
+- **Changes**: what differs from your last sync (or last commit) as clickable hunks, the suggestions you accepted since a time, and a one-click **diff PDF** with every change marked, for a resubmission.
 
 Nothing Margin or Claude needs is ever pushed to Overleaf: review threads, build
 output and Claude settings are listed in `.git/info/exclude`, a local-only
@@ -33,6 +34,7 @@ You need:
 |---|---|---|
 | Node.js 20+ | `brew install node` | `node -v` |
 | TeX with latexmk + synctex | [MacTeX](https://tug.org/mactex/) (full) | `latexmk -v` |
+| `latexdiff` (only for the diff PDF) | included in full MacTeX; with BasicTeX: `sudo tlmgr install latexdiff` | `latexdiff --version` |
 | Claude Code | see claude.com/claude-code | `claude --version` |
 
 Then clone Margin somewhere it can stay (not an iCloud-synced folder) and link it:
@@ -128,6 +130,45 @@ In the editor:
 
 Use **Sync with Overleaf** when you want your accepted changes on Overleaf, and
 before starting a session to pull co-authors' edits.
+
+### What changed, and a diff PDF for resubmissions
+
+**Changes** in the top bar opens a panel over the PDF (the same place as Logs and Find):
+
+- **Since last sync** lists every file that differs from what Overleaf had at your
+  last sync: edits committed here but not yet pushed, edits not yet committed, and
+  new files. Added and deleted lines are shown with the words that changed marked;
+  click a line (or a file name) to open the file at that spot. If a co-author has
+  pushed commits you have not pulled, their changes are *not* shown as if you had
+  deleted them; the panel says how many are waiting.
+- **Uncommitted** shows only the edits not yet committed.
+- **Accepted suggestions** lists the suggestions you accepted in Margin since a time:
+  the last sync, an hour or a day ago, or a time you pick. Margin keeps no record of
+  Claude *sessions*, so this is a filter on when each suggestion was accepted, not
+  "what Claude did this session". Suggestions you have cleared from the review panel
+  are included.
+- If the branch has no upstream (a paper with no remote, or a branch that tracks
+  nothing on Overleaf), there is no "last sync" to measure from: the panel says so
+  and compares with your last commit instead.
+
+**Make diff PDF** (bottom of the panel) runs `latexdiff` between an earlier version
+and the paper as it is now, and shows the result in the PDF pane under a **DIFF**
+bar: added text blue, deleted text red, like Word's Track Changes. Compare with your
+last sync (the default), your last commit, or any earlier commit in the list (an
+Overleaf version, or a tag such as the submitted manuscript). **Back to normal PDF**
+returns; the normal PDF and its build are never replaced, and the diff PDF is built
+in `.margin-build/diff/` (never synced). Papers split over several files are handled
+with `latexdiff --flatten`, which also follows text moved between files. Things it
+cannot compare (an `\input` in the preamble) are listed under the DIFF bar rather than
+silently left unmarked. Some documents confuse `latexdiff` (unusual packages or
+macros inside math, for example); the panel then shows LaTeX's first errors.
+
+`latexdiff` is a separate program: full MacTeX includes it, BasicTeX does not
+(`sudo tlmgr install latexdiff`), and on Ubuntu/Debian it is its own package
+(`sudo apt install latexdiff`). Without it the panel says so instead of failing.
+Margin marks changes with latexdiff's underline/strike-through style when the `ulem`
+and `listings` packages are installed (they are in full MacTeX), and with its
+coloured-font style otherwise, so a minimal TeX install still works.
 
 ### Split screen with your Claude terminal
 
@@ -304,6 +345,8 @@ server/compile.js   latexmk, log parsing, SyncTeX
 server/bib.js       BibTeX parsing, citation checks, DOI/Crossref
 server/zotero.js    Zotero library search and export (Better BibTeX / local API)
 server/git.js       commit / pull --rebase / push
+server/changes.js   Changes view: per-file hunks since the last sync / last commit, accepted-since list
+server/latexdiff.js latexdiff PDF of the changes, built under .margin-build/diff/
 server/init.js      margin init
 templates/          CLAUDE.md, slash commands and the prompt hook installed by init
 web/                UI source (CodeMirror 6, pdf.js) → built into public/

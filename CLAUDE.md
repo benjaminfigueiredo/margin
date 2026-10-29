@@ -21,6 +21,8 @@ server/compile.js   latexmk invocation, TeX log parser, SyncTeX forward/inverse
 server/bib.js       BibTeX parser, citation checks, doi.org and Crossref lookups
 server/zotero.js    Zotero search/export via Better BibTeX JSON-RPC (local API fallback), port 23119
 server/git.js       commit / pull --rebase / push for the Overleaf round-trip
+server/changes.js   Changes view: read-only `git diff` parsed into per-file hunks (since last sync / HEAD), accepted-since list
+server/latexdiff.js latexdiff --flatten between a git ref and the paper, compiled into .margin-build/diff/ (never over the real PDF)
 server/project.js   Path safety (all client paths go through Project.abs), file tree, create/rename/delete/upload
 server/init.js      `margin init`: .mcp.json, .claude/ files, .git/info/exclude
 templates/          CLAUDE.md, slash commands and the prompt hook that `margin init` copies into a paper

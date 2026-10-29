@@ -615,3 +615,75 @@ body { grid-template-columns: minmax(0, 1fr); }
   .pdf-head .zoom-label { min-width: 0; }
   .pdf-find { margin-left: 2px; }
 }
+/* ---------- changes view and diff PDF (web/src/changes.js) ----------
+   A panel over the PDF pane (same slot as Logs and Find) and a bar that says the PDF on show is the
+   diff. Existing colour tokens only, so both themes and the split layout work unchanged. */
+.changes { position: absolute; inset: 34px 0 0 0; background: var(--panel); display: flex; flex-direction: column; z-index: 5; min-height: 0; }
+.changes-modes { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-bottom: 1px solid var(--line); flex-wrap: wrap; flex: none; }
+.changes-modes .seg button { padding: 3px 10px; font-size: 12px; }
+.changes-expand { margin-left: auto; display: flex; gap: 2px; }
+.changes-since { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-bottom: 1px solid var(--line); flex: none; flex-wrap: wrap; }
+.changes-since label { display: flex; align-items: center; gap: 6px; font-weight: 500; }
+.changes-since select, .changes-since input, .cf-row select { padding: 3px 6px; border: 1px solid var(--line-strong); border-radius: 5px; background: var(--paper); font-size: 12px; min-width: 0; }
+.changes-note { flex: none; padding: 6px 10px; font-size: 11.5px; line-height: 1.45; color: var(--ink-2); border-bottom: 1px solid var(--line); }
+.changes-note.info { background: var(--warn-soft); color: var(--warn-ink); border-bottom-color: var(--warn-line); }
+.changes-note.error { color: var(--danger); }
+.changes-list { flex: 1; min-height: 0; overflow: auto; padding: 2px 0 10px; }
+.changes-trunc { margin: 8px 10px 0; padding: 6px 8px; border-radius: 5px; background: var(--warn-soft); color: var(--warn-ink); font-size: 11.5px; }
+.ch-file { margin: 8px 8px 0; border: 1px solid var(--line); border-radius: 6px; background: var(--paper); overflow: hidden; }
+.ch-head { display: flex; align-items: center; gap: 6px; padding: 4px 8px 4px 4px; background: var(--gutter); }
+.ch-toggle { flex: none; width: 20px; border: 0; background: none; cursor: pointer; color: var(--ink-2); padding: 0; }
+.ch-path { min-width: 0; border: 0; background: none; padding: 0; cursor: pointer; text-align: left; font-family: var(--mono); font-size: 12px; font-weight: 600; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ch-path:hover:not(:disabled) { color: var(--accent-ink); text-decoration: underline; }
+.ch-path:disabled { cursor: default; color: var(--muted); }
+.ch-status { flex: none; margin-left: auto; font-size: 10.5px; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-2); border: 1px solid var(--line-strong); border-radius: 9px; padding: 0 6px; }
+.ch-status.A { color: var(--ins-ink); border-color: var(--ins-line); }
+.ch-status.D { color: var(--del-ink); border-color: var(--del-line); }
+.ch-add, .ch-del { flex: none; font-family: var(--mono); font-size: 11.5px; }
+.ch-add { color: var(--ins-ink); }
+.ch-del { color: var(--del-ink); }
+.ch-file.collapsed .ch-body { display: none; }
+.ch-note { padding: 6px 10px; font-size: 11.5px; color: var(--muted); }
+.ch-hunk { border-top: 1px solid var(--line); font-family: var(--mono); font-size: 12px; line-height: 1.5; }
+.ch-hunk + .ch-hunk { border-top: 1px dashed var(--line-strong); }
+.ch-line { display: flex; align-items: baseline; cursor: pointer; border-left: 3px solid transparent; }
+.ch-line:hover, .ch-line:focus-visible { background: var(--hover); border-left-color: var(--accent); outline: none; }
+.ch-line .ln { flex: none; width: 34px; padding-right: 6px; text-align: right; font-size: 11px; color: var(--muted); user-select: none; }
+.ch-line .sign { flex: none; width: 14px; text-align: center; color: var(--muted); user-select: none; }
+.ch-line .tx { flex: 1; min-width: 0; padding-right: 8px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.ch-line.add { background: var(--ins-bg); }
+.ch-line.add .sign { color: var(--ins-ink); }
+.ch-line.del { background: var(--del-bg); }
+.ch-line.del .sign { color: var(--del-ink); }
+.ch-line.add:hover, .ch-line.del:hover, .ch-line.add:focus-visible, .ch-line.del:focus-visible { border-left-color: var(--accent); }
+.w-ins { background: var(--ins-bg); color: var(--ins-ink); border-bottom: 2px solid var(--ins-line); border-radius: 2px; }
+.w-del { background: var(--del-bg); color: var(--del-ink); text-decoration: line-through; text-decoration-color: var(--del-line); border-radius: 2px; }
+.ch-acc { margin: 8px 8px 0; padding: 7px 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--paper); display: grid; gap: 5px; }
+.ch-acc-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.ch-acc-diff { font-family: var(--mono); font-size: 12px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--gutter); border-radius: 5px; padding: 5px 8px; max-height: 140px; overflow: auto; }
+.ch-acc-why { font-size: 12px; color: var(--ink-2); }
+.changes-foot { flex: none; border-top: 1px solid var(--line-strong); padding: 7px 10px; display: grid; gap: 4px; background: var(--panel); }
+.cf-row { display: flex; align-items: center; gap: 6px; }
+.cf-row label { flex: none; font-weight: 500; }
+.cf-row select { flex: 1; }
+.cf-status { font-size: 11.5px; line-height: 1.4; color: var(--muted); }
+.cf-status.error { color: var(--danger); }
+.cf-status:empty { display: none; }
+.cf-status details { margin-top: 4px; }
+.cf-status .log-ctx { max-height: 120px; }
+/* The PDF on show is the diff, not your paper: a bar above it, and a frame around it. */
+.diff-bar { flex: none; display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 5px 8px 5px 10px; background: var(--warn-soft); color: var(--warn-ink); border-bottom: 1px solid var(--warn-line); font-size: 11.5px; line-height: 1.35; }
+.diff-tag { flex: none; padding: 0 7px; border-radius: 4px; background: var(--warn); color: var(--paper); font-weight: 700; font-size: 11px; letter-spacing: .06em; }
+.diff-text { min-width: 0; flex: 1 1 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.diff-break { flex: 1 0 100%; height: 0; }
+.diff-legend { min-width: 0; flex: 1 1 140px; opacity: .9; }
+.diff-notes { flex: 1 0 100%; display: grid; gap: 2px; padding: 4px 0 2px; }
+.pdf-pane.diff-mode .pdf-scroll { box-shadow: inset 0 0 0 3px var(--warn); }
+:root[data-layout="split"] .changes { inset: 28px 0 0 0; }
+:root[data-layout="split"] .changes-modes, :root[data-layout="split"] .changes-since { padding: 3px 8px; }
+:root[data-layout="split"] .changes-note { padding: 3px 8px; max-height: 4.4em; overflow: auto; }
+:root[data-layout="split"] .changes-foot { padding: 4px 8px; gap: 2px; }
+:root[data-layout="split"] .cf-status { max-height: 3.4em; overflow: auto; }
+:root[data-layout="split"] .cf-status.hint { display: none; }
+:root[data-layout="split"] .ch-file { margin: 5px 6px 0; }
+:root[data-layout="split"] .diff-bar { padding: 3px 8px; }

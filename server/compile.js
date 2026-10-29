@@ -5,7 +5,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { BUILD_DIR } from './project.js';
 
-const ENGINE_FLAGS = { pdflatex: '-pdf', xelatex: '-xelatex', lualatex: '-lualatex' };
+export const ENGINE_FLAGS = { pdflatex: '-pdf', xelatex: '-xelatex', lualatex: '-lualatex' };
+
+// max_print_line stops TeX from hard-wrapping log lines at 79 chars, which breaks parsing.
+// Keep it below BibTeX's buffer size (20000), or BibTeX refuses to start. Shared with the
+// latexdiff build (server/latexdiff.js), which must not drift from it.
+export const latexmkEnv = () => ({ ...process.env, max_print_line: '10000', error_line: '254', half_error_line: '238' });
 
 export function compile(project, { engine = 'pdflatex', timeoutMs = 240000 } = {}) {
   return new Promise((resolve) => {
@@ -20,10 +25,7 @@ export function compile(project, { engine = 'pdflatex', timeoutMs = 240000 } = {
       `-outdir=${BUILD_DIR}`,
       project.main,
     ];
-    // max_print_line stops TeX from hard-wrapping log lines at 79 chars, which breaks parsing.
-    // Keep it below BibTeX's buffer size (20000), or BibTeX refuses to start.
-    const env = { ...process.env, max_print_line: '10000', error_line: '254', half_error_line: '238' };
-    const child = spawn('latexmk', args, { cwd: project.root, env });
+    const child = spawn('latexmk', args, { cwd: project.root, env: latexmkEnv() });
     let output = '';
     child.stdout.on('data', (d) => { output += d; });
     child.stderr.on('data', (d) => { output += d; });

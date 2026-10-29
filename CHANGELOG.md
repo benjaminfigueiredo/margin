@@ -9,6 +9,20 @@
   scrolls to the current one. Search ignores case and extra spaces and finds a phrase that runs
   across a line break. Text layers are built only for pages near the view, so a long paper
   stays responsive. A selection or a search survives a zoom change and a recompile.
+- Changes view. **Changes** in the top bar lists what changed since your last sync with
+  Overleaf (committed here but not pushed, plus uncommitted edits and new files) or only the
+  uncommitted edits, as per-file hunks with the changed words marked; click a line or file name to
+  open it there. A co-author's unpulled commits are not shown as your deletions (the panel says
+  how many are waiting), and a branch with no upstream compares with your last commit and says
+  why. A third tab lists the suggestions you accepted since the last sync, an hour, a day, a week
+  or a chosen time, including ones you cleared from the review panel; Margin has no notion of a
+  Claude session, and the panel says it is a time filter.
+- Diff PDF for resubmissions. **Make diff PDF** (bottom of the Changes panel) runs
+  `latexdiff --flatten` against your last sync, last commit or any earlier commit and shows the
+  marked-up PDF under a **DIFF** bar with **Back to normal PDF**; the normal PDF is never replaced
+  and the diff is built under `.margin-build/diff/`. `latexdiff` is a separate install (full
+  MacTeX has it; BasicTeX: `tlmgr install latexdiff`; Ubuntu: `apt install latexdiff`); without
+  it the panel says what to install. CI now installs it.
 - Security fix: any web page you visited could make Margin act on your paper. The server
   only checked that requests were addressed to localhost, which does not stop a page on
   another site from sending one through your browser, so a malicious or compromised page

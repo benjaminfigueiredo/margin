@@ -36,6 +36,7 @@
         </div>
       </div>
       <button id="btn-search" class="btn top" title="Find and replace in the whole project (Ctrl/⌘ + Shift + F)">Find</button>
+      <button id="btn-changes" class="btn top" title="What changed since your last sync, and a marked-up PDF for resubmission">Changes</button>
       <button id="btn-logs" class="btn top" title="Errors and warnings">Logs <span id="log-badge" class="badge hidden"></span></button>
       <button id="btn-review" class="btn top active" title="Show/hide review panel">Review <span id="review-badge" class="badge hidden"></span></button>
       <button id="btn-sync" class="btn top sync" title="Commit your changes, pull from Overleaf, push"><span class="spin" aria-hidden="true"></span>Sync with Overleaf</button>
@@ -150,6 +151,17 @@
         <span id="page-label" class="page-label"></span>
         <a class="btn sm ghost" href="/pdf" download title="Download PDF">Download</a>
       </div>
+      <div id="diff-bar" class="diff-bar hidden" role="status">
+        <span class="diff-tag">DIFF</span>
+        <span id="diff-text" class="diff-text"></span>
+        <span class="diff-break" aria-hidden="true"></span>
+        <span id="diff-legend" class="diff-legend"></span>
+        <span class="spacer"></span>
+        <button id="diff-notes-btn" class="btn sm ghost hidden" aria-expanded="false"></button>
+        <button id="diff-rebuild" class="btn sm ghost" title="Build the diff PDF again from the paper as it is now">Rebuild</button>
+        <button id="diff-back" class="btn sm">Back to normal PDF</button>
+        <div id="diff-notes" class="diff-notes hidden"></div>
+      </div>
       <div id="pdf-scroll" class="pdf-scroll" tabindex="-1">
         <div id="pdf-pages" class="pdf-pages"></div>
         <div id="pdf-empty" class="pdf-empty"><p>No PDF yet.</p><p class="fine">Recompile to build it. Double-click the PDF to jump to the source.</p></div>
@@ -162,6 +174,48 @@
           <button class="btn sm ghost close" aria-label="Close">✕</button>
         </div>
         <div id="log-list" class="log-list"></div>
+      </div>
+      <div id="changes" class="changes hidden" role="region" aria-label="Changes">
+        <div class="logs-head">
+          <strong>Changes</strong>
+          <span id="changes-count" class="fine"></span>
+          <span class="spacer"></span>
+          <button id="changes-refresh" class="btn sm ghost" title="Look again">Refresh</button>
+          <button class="btn sm ghost close" aria-label="Close">✕</button>
+        </div>
+        <div class="changes-modes">
+          <div class="seg" role="group" aria-label="What to compare">
+            <button type="button" data-mode="sync" class="on" title="Everything you have that Overleaf does not: committed here and not pushed, plus edits not yet committed">Since last sync</button>
+            <button type="button" data-mode="head" title="Edits not yet committed">Uncommitted</button>
+            <button type="button" data-mode="accepted" title="Suggestions you accepted in Margin since a time">Accepted suggestions</button>
+          </div>
+          <span id="changes-expand" class="changes-expand">
+            <button type="button" class="btn sm ghost" data-expand="all">Expand all</button>
+            <button type="button" class="btn sm ghost" data-expand="none">Collapse all</button>
+          </span>
+        </div>
+        <div id="changes-since" class="changes-since hidden">
+          <label>Accepted since
+            <select id="changes-since-sel" aria-label="Accepted since">
+              <option value="sync">the last sync</option>
+              <option value="1h">an hour ago</option>
+              <option value="24h">24 hours ago</option>
+              <option value="7d">7 days ago</option>
+              <option value="custom">a time I choose&hellip;</option>
+            </select>
+          </label>
+          <input id="changes-since-time" type="datetime-local" class="hidden" aria-label="Accepted since this time">
+        </div>
+        <div id="changes-note" class="changes-note"></div>
+        <div id="changes-list" class="changes-list"></div>
+        <div id="changes-foot" class="changes-foot">
+          <div class="cf-row">
+            <label for="diff-ref">Diff PDF against</label>
+            <select id="diff-ref" aria-label="Compare the diff PDF with"></select>
+            <button id="diff-make" class="btn sm primary" title="Mark every change since that version in a PDF, like Word's Track Changes. Your normal PDF is not touched.">Make diff PDF</button>
+          </div>
+          <div id="diff-status" class="cf-status"></div>
+        </div>
       </div>
       <div id="search" class="search hidden" role="search" aria-label="Find in project">
         <div class="logs-head">

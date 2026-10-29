@@ -352,6 +352,33 @@ export class ReviewStore extends EventEmitter {
     return item;
   }
 
+  // Suggestions accepted at or after `since` (anything Date.parse reads), newest first. This is
+  // all "since a Claude session" can honestly mean: there is no session id in the data, only
+  // decidedAt. Items cleared from the panel live on in .review/archive.json and still count.
+  // `line` is where the applied text sits now (null if it was edited away or the file is gone).
+  // Read-only: the archive is written by clearClosed() above, never here.
+  acceptedSince(since) {
+    const t = Date.parse(since);
+    if (!Number.isFinite(t)) throw new Error('"since" must be a date and time, e.g. 2026-10-29T09:30:00Z');
+    let archived = [];
+    try { archived = JSON.parse(fs.readFileSync(path.join(path.dirname(this.file), 'archive.json'), 'utf8')).items || []; } catch { /* nothing archived yet */ }
+    const seen = new Set(this.data.items.map((it) => it.id));
+    const texts = new Map();
+    const textOf = (f) => { if (!texts.has(f)) { try { texts.set(f, this.project.read(f)); } catch { texts.set(f, null); } } return texts.get(f); };
+    return [...this.data.items.map((it) => ({ it, archived: false })), ...archived.filter((it) => !seen.has(it.id)).map((it) => ({ it, archived: true }))]
+      .filter(({ it }) => it.kind === 'suggestion' && it.status === 'accepted' && Date.parse(it.decidedAt) >= t)
+      .map(({ it, archived: isArchived }) => {
+        const text = textOf(it.file);
+        const span = text == null ? null : locateApplied(it, text);
+        return {
+          id: it.id, file: it.file, quote: it.quote, replacement: it.appliedReplacement ?? it.replacement ?? '', rationale: it.body || '',
+          author: it.author, decidedBy: it.decidedBy || null, decidedAt: it.decidedAt, archived: isArchived,
+          fileMissing: text == null, line: span ? lineOf(text, span.from) : null,
+        };
+      })
+      .sort((a, b) => b.decidedAt.localeCompare(a.decidedAt));
+  }
+
   // Removes accepted/rejected items. They are appended to .review/archive.json first,
   // so this is recoverable by hand.
   clearClosed() {

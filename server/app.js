@@ -22,6 +22,8 @@ import { countProject } from './wordcount.js';
 import * as projectSearch from './search.js';
 import { mountResponseRoutes } from './responses.js';
 import { createClaudeLink } from './asks.js';
+import { changes as projectChanges, acceptedSince } from './changes.js';
+import * as latexdiff from './latexdiff.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(here, '..', 'public');
@@ -42,7 +44,7 @@ export async function startServer({ root, port = 4242, main, engine }) {
   if (!main && config.main) project.main = config.main;
   const settings = { engine: engine || config.engine || 'pdflatex', autoCompile: config.autoCompile ?? false };
   const review = new ReviewStore(project);
-  const state = { editor: null, lastCompile: null, compiling: null };
+  const state = { editor: null, lastCompile: null, compiling: null, diffing: null };
 
   const app = express();
   const server = http.createServer(app);
@@ -205,6 +207,19 @@ export async function startServer({ root, port = 4242, main, engine }) {
   api.get('/git/status', handle(async () => ({ ...await git.status(project), remoteCheck: gitTimer ? { ...gitFetch } : null })));
   api.post('/git/sync', handle(async (req) => { const r = await git.sync(project, { message: req.body.message || undefined }); broadcast({ type: 'tree-changed' }); return r; }));
   api.post('/git/pull', handle(async () => { const r = await git.pull(project); broadcast({ type: 'tree-changed' }); return r; }));
+  // Changes view (server/changes.js): per-file hunks since the last sync or since the last commit, and the
+  // suggestions accepted since a time. Read-only; nothing here moves HEAD or touches the working tree.
+  api.get('/changes', handle(async (req) => projectChanges(project, { since: req.query.since || 'sync' })));
+  api.get('/changes/accepted', handle(async (req) => acceptedSince(project, review, req.query.since || 'sync')));
+  // Marked-up PDF of the changes (server/latexdiff.js), built under .margin-build/diff/, served at /pdf-diff.
+  api.get('/latexdiff', handle(async () => ({ ...(await latexdiff.checkLatexdiff()), last: latexdiff.lastDiff(project), building: !!state.diffing })));
+  api.post('/latexdiff', handle(async (req) => {
+    const ref = req.body?.ref;
+    if (ref != null && typeof ref !== 'string') throw new Error('ref must be a string');
+    if (state.diffing) throw Object.assign(new Error('A diff PDF is already being built. Wait for it to finish.'), { status: 409 });
+    state.diffing = latexdiff.makeDiffPdf(project, { ref, engine: settings.engine });
+    try { return await state.diffing; } finally { state.diffing = null; }
+  }));
   api.get('/wordcount', handle(async () => countProject(project.main, (rel) => project.read(rel))));
   api.get('/search', handle(async (req) => projectSearch.search(project, { q: req.query.q, regex: req.query.regex === '1', caseSensitive: req.query.case === '1', whole: req.query.whole === '1' })));
   api.post('/replace', handle(async (req) => {
@@ -227,6 +242,12 @@ export async function startServer({ root, port = 4242, main, engine }) {
     if (!fs.existsSync(project.pdfPath)) return res.status(404).send('No PDF yet');
     res.set('Cache-Control', 'no-store');
     res.sendFile(project.pdfPath, { dotfiles: 'allow' }); // .margin-build is a dot-folder
+  });
+  // The latexdiff build lives in its own folder; the real PDF above is never replaced by it.
+  app.get('/pdf-diff', (req, res) => {
+    if (!fs.existsSync(latexdiff.diffPdfPath(project))) return res.status(404).send('No diff PDF yet');
+    res.set('Cache-Control', 'no-store');
+    res.sendFile(latexdiff.diffPdfPath(project), { dotfiles: 'allow' });
   });
   app.use(express.static(PUBLIC, { index: 'index.html' }));
 

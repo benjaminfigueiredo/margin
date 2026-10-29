@@ -4,9 +4,10 @@
 import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 
-function git(project, args, { timeout = 120000 } = {}) {
+// Exported for server/changes.js. maxBuffer is only for callers that read a whole diff.
+export function git(project, args, { timeout = 120000, maxBuffer } = {}) {
   return new Promise((resolve) => {
-    execFile('git', args, { cwd: project.root, timeout, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } }, (err, stdout, stderr) => {
+    execFile('git', args, { cwd: project.root, timeout, ...(maxBuffer ? { maxBuffer } : {}), env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } }, (err, stdout, stderr) => {
       resolve({ ok: !err, code: err ? err.code : 0, stdout: stdout.toString(), stderr: stderr.toString() });
     });
   });

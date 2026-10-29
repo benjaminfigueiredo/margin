@@ -10,6 +10,7 @@ import { createFiles } from './files.js';
 import { createSearch } from './search.js';
 import { createResponsePanel } from './response.js';
 import { initAsk } from './ask.js';
+import { createChanges } from './changes.js';
 
 const state = {
   project: null,
@@ -302,6 +303,8 @@ $('#new-comment textarea').addEventListener('keydown', (e) => {
 // ---------- PDF ----------
 const pdf = createPdfView($('#pdf-scroll'), $('#pdf-pages'), {
   onInverse: async (page, x, y) => {
+    // SyncTeX belongs to the normal build; the diff PDF has other page positions.
+    if (changes.diffActive()) return toast('This is the diff PDF. Go back to the normal PDF to jump to the source.', 'info');
     try {
       const loc = await api(`/synctex/inverse?page=${page}&x=${x}&y=${y}`);
       if (!loc || !loc.file) return toast('No source location for that spot', 'info');
@@ -313,6 +316,7 @@ const pdf = createPdfView($('#pdf-scroll'), $('#pdf-pages'), {
 });
 
 async function loadPdf() {
+  if (changes.diffActive()) return; // a recompile must not swap the diff PDF out from under the reader
   const ok = await pdf.load('/pdf');
   $('#pdf-empty').classList.toggle('hidden', ok || pdf.loaded);
   $('#zoom-label').textContent = pdf.zoomLabel;
@@ -320,6 +324,7 @@ async function loadPdf() {
 
 async function forwardSearch() {
   if (!state.file || !state.file.endsWith('.tex')) return;
+  if (changes.diffActive() && !(await changes.back())) return; // forward search is for the normal PDF
   if (state.dirty) await save();
   const info = selectionInfo(editor.view.state);
   try {
@@ -339,7 +344,7 @@ initPdfFind($('#pdf-find'), pdf, { reveal: () => { showLogs(false); search.close
 const search = createSearch($('#search'), {
   saveIfDirty: () => (state.dirty ? save() : Promise.resolve()),
   getSelection: () => { const s = selectionInfo(editor.view.state).selection; return s && s.fromLine === s.toLine ? s.text : ''; },
-  onOpen: () => showLogs(false),
+  onOpen: () => { showLogs(false); changes.close(); },
   onJump: async (file, line, column, length) => {
     if (file !== state.file) await openFile(file);
     const doc = editor.view.state.doc;
@@ -355,6 +360,30 @@ const search = createSearch($('#search'), {
   },
 });
 $('#btn-search').addEventListener('click', () => search.toggle());
+
+// ---------- changes and the diff PDF (web/src/changes.js; server/changes.js, server/latexdiff.js) ----------
+const changes = createChanges($('#changes'), {
+  bar: $('#diff-bar'),
+  downloadLink: $('#pdf-pane a[download]'),
+  getMain: () => state.project?.main,
+  saveIfDirty: () => (state.dirty ? save() : Promise.resolve()),
+  onOpen: () => { showLogs(false); search.close(); },
+  onJump: async (file, line) => {
+    if (file !== state.file) await openFile(file, { line });
+    else editor.gotoLine(line);
+    editor.focus();
+  },
+  showPdf: async (url) => {
+    let ok;
+    // pdf.load() swaps the new document in and then calls old.destroy(), which pdfjs-dist 6 no longer has
+    // (it moved to loadingTask.destroy()), so on every reload after the first it throws once the new PDF is
+    // already on screen. Tolerate exactly that, so a diff PDF that did load is not reported as a failure.
+    try { ok = await pdf.load(url); } catch (e) { if (e instanceof TypeError && /destroy/.test(e.message) && pdf.loaded) ok = true; else throw e; }
+    if (url === '/pdf') $('#pdf-empty').classList.toggle('hidden', ok || pdf.loaded);
+    return ok;
+  },
+});
+$('#btn-changes').addEventListener('click', () => changes.toggle());
 
 // ---------- compile ----------
 async function compile() {
@@ -421,7 +450,7 @@ function applyDiagnostics() {
 
 function showLogs(on) {
   const open = on ?? $('#logs').classList.contains('hidden');
-  if (open) search.close();
+  if (open) { search.close(); changes.close(); }
   $('#logs').classList.toggle('hidden', !open);
   $('#btn-logs').classList.toggle('active', open);
 }
@@ -570,11 +599,12 @@ function connect() {
   ws.onmessage = async (ev) => {
     const msg = JSON.parse(ev.data);
     switch (msg.type) {
-      case 'review-changed': await refreshReview(); break;
+      case 'review-changed': changes.refreshSoon(); await refreshReview(); break;
       case 'responses-changed': response.refresh(); break;
-      case 'tree-changed': await loadTree(); refreshGit(); break;
+      case 'tree-changed': changes.refreshSoon(); await loadTree(); refreshGit(); break;
       case 'file-changed':
         refreshGit();
+        changes.refreshSoon();
         if (msg.external) search.refreshSoon();
         if (msg.path === state.file && msg.external) {
           if (!state.dirty) await reloadCurrentFromDisk();
@@ -582,7 +612,7 @@ function connect() {
           applyReviewToEditor();
         }
         break;
-      case 'git-changed': onGitChanged(msg); break;
+      case 'git-changed': changes.refreshSoon(); onGitChanged(msg); break;
       case 'compile-start': onCompileStart(msg.by); break;
       case 'claude-activity': ask.onActivity(msg); break;
       case 'compile-done': await onCompileDone(msg); break;

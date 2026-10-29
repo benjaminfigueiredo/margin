@@ -5,6 +5,7 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -1363,6 +1364,232 @@ step('margin init: MCP config, prompt hook, /margin command; idempotent, keeps t
   assert.equal(status.trim(), '', `init left files git would push:\n${status}`);
   assert.ok(new Project(dir).isIgnored('.claude/hooks/margin-asks.mjs'));
   fs.rmSync(dir, { recursive: true, force: true });
+}
+
+// Changes view (server/changes.js) and latexdiff PDF (server/latexdiff.js): a clone of a bare "Overleaf"
+// repo with a commit, a local commit ahead of it, an uncommitted edit and a brand-new file.
+step('changes: since the last sync, uncommitted, a diverged upstream, no upstream, not a repo');
+const chg = {};
+{
+  const { parseDiff, resolveRef } = await import('../server/changes.js');
+  const sh = (cwd, ...a) => execFileSync('git', ['-c', 'user.name=test', '-c', 'user.email=test@example.org', ...a], { cwd, stdio: 'pipe' }).toString();
+  const g = fs.mkdtempSync(path.join(os.tmpdir(), 'margin-changes-'));
+  const bare = path.join(g, 'remote.git');
+  sh(g, 'init', '-q', '--bare', '-b', 'master', bare);
+  const mine = path.join(g, 'mine'), theirs = path.join(g, 'theirs');
+  sh(g, 'clone', '-q', bare, mine);
+  fs.cpSync(new URL('../examples/sample-paper', import.meta.url), mine, { recursive: true });
+  sh(mine, 'add', '-A'); sh(mine, 'commit', '-qm', 'init'); sh(mine, 'push', '-q', '-u', 'origin', 'HEAD:master');
+  sh(g, 'clone', '-q', bare, theirs);
+  const cport = 46000 + Math.floor(Math.random() * 1500);
+  const csrv = await startServer({ root: mine, port: cport });
+  const cbase = `http://127.0.0.1:${cport}`;
+  const get = async (p) => { const r = await fetch(`${cbase}/api${p}`); return { status: r.status, body: await r.json() }; };
+  const post = async (p, body) => { const r = await fetch(`${cbase}/api${p}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) }); return { status: r.status, body: await r.json() }; };
+  Object.assign(chg, { g, mine, theirs, cbase, csrv, sh, get, post, firstSha: sh(mine, 'rev-parse', 'HEAD').trim() });
+
+  let c = (await get('/changes')).body;
+  assert.equal(c.repo, true); assert.equal(c.tracking, true);
+  assert.deepEqual(c.files, [], 'nothing changed yet: an empty list, not an error');
+
+  // ahead by one commit + an uncommitted edit + a new file git has never seen
+  const edit = (rel, from, to) => { const f = path.join(mine, rel); const t = fs.readFileSync(f, 'utf8'); assert.ok(t.includes(from), `${rel} has ${from}`); fs.writeFileSync(f, t.replace(from, to)); };
+  edit('main.tex', 'very important', 'crucial');
+  sh(mine, 'commit', '-qam', 'committed here, not pushed');
+  edit('sections/intro.tex', 'the ocean', 'the sea');
+  fs.writeFileSync(path.join(mine, 'sections', 'extra notes.tex'), 'A brand new section.\nWith two lines.\n');
+  fs.writeFileSync(path.join(mine, 'figure.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47, 0, 1, 2]));
+
+  c = (await get('/changes?since=sync')).body;
+  assert.equal(c.kind, 'upstream'); assert.equal(c.ahead, 1);
+  const byPath = (x) => Object.fromEntries(x.files.map((f) => [f.path, f]));
+  let f = byPath(c);
+  assert.deepEqual(Object.keys(f).sort(), ['figure.png', 'main.tex', 'sections/extra notes.tex', 'sections/intro.tex'], 'committed-ahead, uncommitted and untracked files are all "since the last sync"');
+  assert.equal(f['main.tex'].status, 'M'); assert.equal(f['main.tex'].additions, 1); assert.equal(f['main.tex'].deletions, 1);
+  const hunkLines = f['main.tex'].hunks.flatMap((h) => h.lines);
+  const added = hunkLines.find((l) => l.t === '+'), removed = hunkLines.find((l) => l.t === '-');
+  assert.match(added.text, /it is crucial to understand/); assert.match(removed.text, /very important/);
+  const mainSrc = fs.readFileSync(path.join(mine, 'main.tex'), 'utf8').split('\n');
+  assert.equal(mainSrc[added.n - 1], added.text, 'a hunk line carries its line number in the file on disk, so a click can jump to it');
+  assert.equal(removed.n, null); assert.ok(removed.o > 0);
+  assert.equal(f['sections/extra notes.tex'].status, 'A'); assert.equal(f['sections/extra notes.tex'].untracked, true);
+  assert.equal(f['sections/extra notes.tex'].additions, 2); assert.equal(f['sections/extra notes.tex'].hunks[0].lines[1].n, 2);
+  assert.equal(f['figure.png'].binary, true, 'an untracked image is listed, without hunks');
+  assert.equal(c.totals.files, 4);
+
+  c = (await get('/changes?since=head')).body;
+  assert.deepEqual(Object.keys(byPath(c)).sort(), ['figure.png', 'sections/extra notes.tex', 'sections/intro.tex'], 'uncommitted: main.tex was committed, so it is not listed');
+  assert.equal(c.kind, 'head');
+  assert.equal((await get('/changes?since=bogus')).status, 400);
+
+  // Margin's own files never show up as changes (they are local-only)
+  assert.ok(!Object.keys(byPath((await get('/changes')).body)).some((p) => /^\.(review|margin-build|claude)|\.mcp\.json/.test(p)));
+
+  // A co-author pushes while we are ahead. Diffing against the upstream tip would show their work as
+  // our deletion; the baseline is the merge-base, so it must not appear.
+  fs.appendFileSync(path.join(theirs, 'refs.bib'), '\n% a co-author note\n');
+  sh(theirs, 'commit', '-qam', 'co-author edit'); sh(theirs, 'push', '-q');
+  await csrv.gitPoll();
+  c = (await get('/changes?since=sync')).body;
+  assert.equal(c.behind, 1, 'the response says how many Overleaf commits are not pulled');
+  assert.ok(!byPath(c)['refs.bib'], "a co-author's unpulled change is not shown as if it were ours");
+  assert.deepEqual(Object.keys(byPath(c)).sort(), ['figure.png', 'main.tex', 'sections/extra notes.tex', 'sections/intro.tex']);
+
+  // Names with spaces and non-ASCII characters, renames, quoted paths, and what each line number means
+  const parsed = parseDiff(['diff --git a/my notes é.tex b/my notes é.tex', 'index 111..222 100644', '--- a/my notes é.tex', '+++ b/my notes é.tex', '@@ -3,2 +3,3 @@ ctx', ' keep', '-gone', '+new', '+newer', '\\ No newline at end of file',
+    'diff --git "a/q\\"uote \\303\\251.tex" "b/q\\"uote \\303\\251.tex"', 'new file mode 100644', 'index 0000000..333', '--- /dev/null', '+++ "b/q\\"uote \\303\\251.tex"', '@@ -0,0 +1 @@', '+x',
+    'diff --git a/old name.tex b/new name.tex', 'similarity index 100%', 'rename from old name.tex', 'rename to new name.tex',
+    'diff --git a/img 1.png b/img 1.png', 'index 1..2 100644', 'Binary files a/img 1.png and b/img 1.png differ', ''].join('\n'));
+  assert.deepEqual(parsed.map((p) => [p.path, p.status]), [['my notes é.tex', 'M'], ['q"uote é.tex', 'A'], ['new name.tex', 'R'], ['img 1.png', 'M']]);
+  assert.equal(parsed[2].oldPath, 'old name.tex'); assert.equal(parsed[3].binary, true);
+  assert.deepEqual(parsed[0].hunks[0].lines.map((l) => [l.t, l.o, l.n]), [[' ', 3, 3], ['-', 4, null], ['+', null, 4], ['+', null, 5]]);
+
+  // The ref that reaches git is checked first: nothing that looks like an option, and only what git can resolve.
+  await assert.rejects(resolveRef(new Project(mine), '--output=/tmp/margin-pwned'), /not a valid git ref/);
+  await assert.rejects(resolveRef(new Project(mine), '-x'), /not a valid git ref/);
+  await assert.rejects(resolveRef(new Project(mine), 'no-such-branch'), /does not know/);
+  assert.equal(await resolveRef(new Project(mine), 'HEAD'), sh(mine, 'rev-parse', 'HEAD').trim());
+  assert.equal(await resolveRef(new Project(mine), chg.firstSha.slice(0, 8)), chg.firstSha);
+
+  // No upstream: "since the last sync" has no meaning, so it falls back to the last commit and says so.
+  const lone = path.join(g, 'lone');
+  fs.cpSync(new URL('../examples/sample-paper', import.meta.url), lone, { recursive: true });
+  sh(lone, 'init', '-q'); sh(lone, 'add', '-A'); sh(lone, 'commit', '-qm', 'one');
+  fs.appendFileSync(path.join(lone, 'main.tex'), '\n% local only\n');
+  const lport = cport + 1;
+  const lsrv = await startServer({ root: lone, port: lport });
+  const lc = await (await fetch(`http://127.0.0.1:${lport}/api/changes?since=sync`)).json();
+  assert.equal(lc.tracking, false); assert.equal(lc.kind, 'head', 'no upstream: compared with HEAD');
+  assert.deepEqual(lc.files.map((x) => x.path), ['main.tex']);
+  sh(lone, 'checkout', '-q', '-b', 'side'); // a repo with commits but a branch that tracks nothing
+  assert.equal((await (await fetch(`http://127.0.0.1:${lport}/api/changes`)).json()).tracking, false);
+  await lsrv.close();
+
+  // Not a repo, and a repo without commits: a message, never a crash
+  const plain = path.join(g, 'plain');
+  fs.mkdirSync(plain); fs.writeFileSync(path.join(plain, 'main.tex'), 'x\n');
+  const psrv = await startServer({ root: plain, port: cport + 2 });
+  const pc = await (await fetch(`http://127.0.0.1:${cport + 2}/api/changes`)).json();
+  assert.equal(pc.repo, false); assert.deepEqual(pc.files, []);
+  await psrv.close();
+  const empty = path.join(g, 'empty');
+  fs.mkdirSync(empty); fs.writeFileSync(path.join(empty, 'main.tex'), 'x\n'); sh(empty, 'init', '-q');
+  const esrv = await startServer({ root: empty, port: cport + 3 });
+  const ec = await (await fetch(`http://127.0.0.1:${cport + 3}/api/changes`)).json();
+  assert.equal(ec.noCommits, true); assert.deepEqual(ec.files, []);
+  await esrv.close();
+  console.log('hunks with line numbers; ahead + uncommitted + untracked; diverged upstream shows only our side; no-upstream falls back to HEAD; non-repo and no-commit repos answer cleanly');
+}
+
+step('changes: suggestions accepted since a time (live and archived), and what "since" means');
+{
+  const { get, post, mine } = chg;
+  const sug = async (file, original, replacement) => { const r = await post('/review/suggest', { file, original, replacement, rationale: 'because' }); assert.equal(r.status, 200, JSON.stringify(r.body)); return r.body; };
+  const before = new Date(Date.now() - 60000).toISOString();
+  const a = await sug('sections/methods.tex', 'Each heatwave consisted of a ramp', 'Each heatwave consisted of a linear ramp');
+  const b = await sug('sections/intro.tex', 'which may underestimate cumulative effects', 'which may underestimate their cumulative effects');
+  const rej = await sug('sections/intro.tex', 'leads to acclimation', 'causes acclimation');
+  assert.equal((await get(`/changes/accepted?since=${encodeURIComponent(before)}`)).body.items.length, 0, 'open suggestions are not accepted ones');
+  { const ar = await post(`/review/${a.id}/accept`); assert.equal(ar.status, 200, JSON.stringify(ar.body)); }
+  assert.equal((await post(`/review/${b.id}/accept`)).status, 200);
+  assert.equal((await post(`/review/${rej.id}/reject`)).status, 200);
+  let acc = (await get(`/changes/accepted?since=${encodeURIComponent(before)}`)).body;
+  assert.deepEqual(acc.items.map((i) => i.id).sort(), [a.id, b.id].sort(), 'accepted ones only, not the rejected one');
+  assert.ok(acc.items[0].decidedAt >= acc.items[1].decidedAt, 'newest first');
+  const it = acc.items.find((i) => i.id === a.id);
+  assert.equal(it.replacement, 'Each heatwave consisted of a linear ramp'); assert.equal(it.archived, false);
+  const methods = fs.readFileSync(path.join(mine, 'sections/methods.tex'), 'utf8').split('\n');
+  assert.ok(methods[it.line - 1].includes('Each heatwave consisted of a linear ramp'), 'line points at the applied text in the file');
+  // A later start time excludes them; garbage is refused
+  assert.equal((await get(`/changes/accepted?since=${encodeURIComponent(new Date(Date.now() + 3600000).toISOString())}`)).body.items.length, 0);
+  assert.equal((await get('/changes/accepted?since=yesterday-ish')).status, 400);
+  // Clearing closed items archives them; they must still count (the store forgot them, the archive did not)
+  assert.ok((await post('/review/clear-closed')).body.removed >= 3);
+  assert.equal((await get('/review?status=accepted')).body.length, 0, 'gone from the live store');
+  acc = (await get(`/changes/accepted?since=${encodeURIComponent(before)}`)).body;
+  assert.deepEqual(acc.items.map((i) => i.id).sort(), [a.id, b.id].sort(), 'archived accepted suggestions are counted too');
+  assert.ok(acc.items.every((i) => i.archived === true));
+  // 'sync' is the time of the commit the Changes view compares with (here: the first commit, a moment ago)
+  const sync = (await get('/changes/accepted?since=sync')).body;
+  assert.equal(sync.basis, 'sync'); assert.equal(sync.items.length, 2);
+  // Undoing an accept removes it from the list (it is open again)
+  const c2 = await sug('sections/intro.tex', 'Previous work has mostly', 'Earlier work has mostly');
+  await post(`/review/${c2.id}/accept`);
+  assert.equal((await get(`/changes/accepted?since=${encodeURIComponent(before)}`)).body.items.length, 3);
+  await post(`/review/${c2.id}/unaccept`);
+  assert.equal((await get(`/changes/accepted?since=${encodeURIComponent(before)}`)).body.items.length, 2);
+  // Read-only: asking never touched the store
+  assert.equal((await get('/review?status=open')).body.length, 1, 'only the unaccepted suggestion is open');
+  console.log('accepted-since lists live + archived accepted suggestions, newest first, with the line of the applied text');
+}
+
+step('latexdiff: clear message when missing; marked-up PDF built beside, never over, the normal PDF');
+{
+  const { checkLatexdiff, MISSING_MESSAGE } = await import('../server/latexdiff.js');
+  const { get, post, mine, sh, cbase, firstSha } = chg;
+  const nowhere = await checkLatexdiff('definitely-not-a-latexdiff-binary');
+  assert.equal(nowhere.installed, false);
+  assert.match(nowhere.message, /latexdiff/); assert.match(nowhere.message, /tlmgr/); assert.match(nowhere.message, /apt install latexdiff/);
+  assert.equal(nowhere.message, MISSING_MESSAGE);
+  // the build itself refuses with that message, names the command, and has touched nothing
+  const { makeDiffPdf } = await import('../server/latexdiff.js');
+  await assert.rejects(makeDiffPdf(new Project(mine), { latexdiff: 'definitely-not-a-latexdiff-binary' }), (e) => e.missing === 'latexdiff' && /latexdiff is not installed/.test(e.message));
+  assert.equal(fs.existsSync(path.join(mine, '.margin-build', 'diff')), false, 'a missing tool must not create the diff folder');
+  const tool = (await get('/latexdiff')).body;
+  assert.equal(typeof tool.installed, 'boolean');
+  if (!tool.installed) {
+    const r = await post('/latexdiff', {});
+    assert.ok(r.status >= 400); assert.match(r.body.error, /latexdiff is not installed/);
+    console.log('SKIPPED the build part: latexdiff is not on PATH here. Without it the API answers:', r.body.error);
+  } else {
+    console.log(`using ${tool.version}`);
+    const sha256 = (f) => crypto.createHash('sha256').update(fs.readFileSync(f)).digest('hex');
+    const normalPdf = path.join(mine, '.margin-build', 'main.pdf');
+    assert.equal((await post('/compile')).body.ok, true);
+    const normal = { hash: sha256(normalPdf), mtime: fs.statSync(normalPdf).mtimeMs };
+
+    const r = await post('/latexdiff', {});
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.equal(r.body.ok, true); assert.equal(r.body.url, '/pdf-diff');
+    assert.match(r.body.ref, /last sync/);
+    const diffDir = path.join(mine, '.margin-build', 'diff');
+    const tex = fs.readFileSync(path.join(diffDir, 'margin-diff.tex'), 'utf8');
+    // --flatten: the \input'd sections are inside the one document, with their own changes marked
+    assert.ok(!/\\input\{sections\/intro\}/.test(tex), 'sections/intro.tex was inlined');
+    assert.match(tex, /\\DIFadd\{sea\s*\}/, 'a change inside an \\input file is marked');
+    assert.match(tex, /\\DIFadd\{crucial\s*\}/, 'a change in the main file, committed locally, is marked');
+    const pdfRes = await fetch(`${cbase}/pdf-diff`);
+    assert.equal(pdfRes.status, 200); assert.match(pdfRes.headers.get('content-type'), /pdf/);
+    assert.equal(Buffer.from(await pdfRes.arrayBuffer()).subarray(0, 4).toString(), '%PDF');
+    // the real PDF is untouched, and still what /pdf serves
+    assert.equal(sha256(normalPdf), normal.hash); assert.equal(fs.statSync(normalPdf).mtimeMs, normal.mtime);
+    const realRes = Buffer.from(await (await fetch(`${cbase}/pdf`)).arrayBuffer());
+    assert.equal(crypto.createHash('sha256').update(realRes).digest('hex'), normal.hash, '/pdf still serves the normal build');
+    // scratch trees are gone; nothing leaked into the paper or into git
+    assert.deepEqual(fs.readdirSync(diffDir).filter((n) => n === 'old' || n === 'new'), []);
+    const porcelain = sh(mine, 'status', '--porcelain');
+    assert.ok(!/margin-build|\.margin|margin-diff/.test(porcelain), `latexdiff must leave nothing for git:\n${porcelain}`);
+    assert.ok(!fs.existsSync(path.join(mine, 'margin-diff.tex')) && !fs.existsSync(path.join(mine, 'margin-diff.pdf')));
+    assert.equal((await get('/latexdiff')).body.last.sha, r.body.sha, 'the last build is reported (and survives a restart via meta.json)');
+
+    // against an explicit commit: the first one, so the local commit is in the diff too
+    const r2 = await post('/latexdiff', { ref: firstSha });
+    assert.equal(r2.body.ok, true); assert.equal(r2.body.sha, firstSha); assert.equal(r2.body.ref, firstSha.slice(0, 7));
+    // refs git cannot use, and refs that look like options, are refused before anything runs
+    for (const bad of ['--output=/tmp/margin-pwned', '-h', 'nope/nope', '$(touch /tmp/margin-pwned)']) {
+      const e = await post('/latexdiff', { ref: bad });
+      assert.ok(e.status >= 400, `${bad} refused`); assert.ok(e.body.error);
+    }
+    assert.ok(!fs.existsSync('/tmp/margin-pwned'));
+    assert.equal((await post('/latexdiff', { ref: 5 })).status, 400);
+    // one build at a time: a second request while one runs is refused, not queued
+    const [x, y] = await Promise.all([post('/latexdiff', {}), post('/latexdiff', {})]);
+    assert.deepEqual([x.status, y.status].sort(), [200, 409]);
+    assert.equal(sha256(normalPdf), normal.hash, 'still untouched after several builds');
+    console.log(`diff PDF built (${r.body.style} style, ${r.body.durationMs} ms); normal PDF byte-identical; scratch trees removed; nothing for git`);
+  }
+  await chg.csrv.close();
+  fs.rmSync(chg.g, { recursive: true, force: true });
 }
 
 console.log('\nAll checks passed.');
