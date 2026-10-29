@@ -34,6 +34,7 @@
           <p class="fine">Match the compiler and TeX Live version set in your Overleaf project menu.</p>
         </div>
       </div>
+      <button id="btn-search" class="btn top" title="Find and replace in the whole project (Ctrl/⌘ + Shift + F)">Find</button>
       <button id="btn-logs" class="btn top" title="Errors and warnings">Logs <span id="log-badge" class="badge hidden"></span></button>
       <button id="btn-review" class="btn top active" title="Show/hide review panel">Review <span id="review-badge" class="badge hidden"></span></button>
       <button id="btn-sync" class="btn top sync" title="Commit your changes, pull from Overleaf, push"><span class="spin" aria-hidden="true"></span>Sync with Overleaf</button>
@@ -125,6 +126,29 @@
           <button class="btn sm ghost close" aria-label="Close">✕</button>
         </div>
         <div id="log-list" class="log-list"></div>
+      </div>
+      <div id="search" class="search hidden" role="search" aria-label="Find in project">
+        <div class="logs-head">
+          <strong>Find in project</strong>
+          <span id="search-count" class="fine"></span>
+          <span class="spacer"></span>
+          <button class="btn sm ghost close" aria-label="Close">✕</button>
+        </div>
+        <div class="search-form">
+          <div class="search-row">
+            <input id="search-q" type="text" placeholder="Find" aria-label="Find" autocomplete="off" spellcheck="false">
+            <button type="button" class="opt" data-opt="case" aria-pressed="false" title="Match case">Aa</button>
+            <button type="button" class="opt" data-opt="whole" aria-pressed="false" title="Whole word">ab</button>
+            <button type="button" class="opt" data-opt="regex" aria-pressed="false" title="Regular expression">.*</button>
+          </div>
+          <div class="search-row">
+            <input id="search-r" type="text" placeholder="Replace with" aria-label="Replace with" autocomplete="off" spellcheck="false">
+            <button id="search-all" class="btn sm" disabled title="Replace every match in every file listed below">Replace all</button>
+          </div>
+          <div id="search-confirm" class="search-confirm hidden" role="alert"></div>
+          <div id="search-note" class="search-note"></div>
+        </div>
+        <div id="search-results" class="search-results"></div>
       </div>
     </section>
   </main>
