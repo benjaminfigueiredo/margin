@@ -10,6 +10,11 @@
 - Browser tests (Playwright, `npm run test:ui`) now cover the editor UI: boot, save,
   compile log, accept/reject, comments, PDF → source and the review panel toggle.
   `npm test` runs both the API and the UI suites.
+- Fix: Margin could previously write (and read) through a symlink inside the paper
+  folder that points outside it, overwriting files elsewhere on disk. Paths are
+  now resolved through symlinks and refused if they leave the paper folder;
+  symlinks that stay inside, and a paper folder reached through a symlink, work
+  as before.
 - New Claude tools `search_zotero` and `cite_from_zotero`: search the Zotero
   library open on this Mac and copy single entries into the paper's `.bib` under
   their Better BibTeX citation keys. Works with group libraries; falls back to

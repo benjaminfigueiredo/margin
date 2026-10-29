@@ -122,6 +122,56 @@ console.log('forward', fwd); assert.ok(fwd.page >= 1);
 const inv = await rest(`/synctex/inverse?page=${fwd.page}&x=${fwd.h + 5}&y=${fwd.v - 2}`);
 console.log('inverse', inv); assert.equal(inv.file, 'sections/methods.tex');
 
+step('path safety: symlinks (Project.abs)');
+{
+  const { Project } = await import('../server/project.js');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'margin-symlink-'));
+  try {
+    const outside = path.join(dir, 'outside');
+    const paper = path.join(dir, 'paper');
+    fs.mkdirSync(outside); fs.mkdirSync(path.join(paper, 'real'), { recursive: true });
+    fs.writeFileSync(path.join(outside, 'secret.txt'), 'ORIGINAL');
+    fs.writeFileSync(path.join(paper, 'real', 'in.tex'), 'inside');
+    fs.symlinkSync(path.join(outside, 'secret.txt'), path.join(paper, 'link.txt'));
+    fs.symlinkSync(outside, path.join(paper, 'linkdir'));
+    fs.symlinkSync(path.join(outside, 'not-yet.txt'), path.join(paper, 'dangling.txt'));
+    fs.symlinkSync(path.join(paper, 'real'), path.join(paper, 'okdir'));
+    fs.symlinkSync(path.join(paper, 'real', 'in.tex'), path.join(paper, 'ok.tex'));
+    const proj = new Project(paper);
+
+    // file symlink pointing outside: write refused, target unchanged, read refused too
+    assert.throws(() => proj.write('link.txt', 'PWNED'), /Path escapes project.*link\.txt/);
+    assert.equal(fs.readFileSync(path.join(outside, 'secret.txt'), 'utf8'), 'ORIGINAL');
+    assert.throws(() => proj.read('link.txt'), /Path escapes project/);
+    // directory symlink pointing outside: existing and new files under it refused
+    assert.throws(() => proj.write('linkdir/secret.txt', 'PWNED'), /Path escapes project/);
+    assert.throws(() => proj.write('linkdir/new/deep.txt', 'PWNED'), /Path escapes project/);
+    assert.ok(!fs.existsSync(path.join(outside, 'new')));
+    assert.equal(fs.readFileSync(path.join(outside, 'secret.txt'), 'utf8'), 'ORIGINAL');
+    // dangling symlink: a write would create the outside target
+    assert.throws(() => proj.write('dangling.txt', 'PWNED'), /Path escapes project/);
+    assert.ok(!fs.existsSync(path.join(outside, 'not-yet.txt')));
+    // symlinks that stay inside keep working; new files and folders still can be created
+    proj.write('okdir/via-link.tex', 'x');
+    assert.equal(fs.readFileSync(path.join(paper, 'real', 'via-link.tex'), 'utf8'), 'x');
+    assert.equal(proj.read('ok.tex'), 'inside');
+    proj.write('sub/dir/new.tex', 'n');
+    assert.equal(proj.read('sub/dir/new.tex'), 'n');
+    // lexical escapes still refused
+    assert.throws(() => proj.abs('../outside/secret.txt'), /Path escapes project/);
+
+    // paper root itself behind a symlink (macOS /var, /tmp): ordinary paths must work (cf. 3471077)
+    const viaLink = path.join(dir, 'root-link');
+    fs.symlinkSync(paper, viaLink);
+    const p2 = new Project(viaLink);
+    p2.write('chapters/a.tex', 'hello');
+    assert.equal(p2.read('chapters/a.tex'), 'hello');
+    assert.equal(p2.read('ok.tex'), 'inside');
+    assert.throws(() => p2.write('link.txt', 'PWNED'), /Path escapes project/);
+    console.log('symlink checks ok');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+}
+
 step('editor state (as posted by the UI)');
 await rest('/editor-state', { method: 'POST', body: { file: 'main.tex', cursorLine: 15, selection: { text: 'measured survival, egg production', fromLine: 16, toLine: 16 } } });
 r = await call('get_editor_state');
@@ -177,8 +227,6 @@ if (running) {
 // it runs the same whether the server is in-process or external.
 step('Project.abs: traversal rejected, normal paths normalised');
 const safeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'margin-pathsafe-'));
-const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), 'margin-outside-'));
-fs.writeFileSync(path.join(outsideDir, 'secret.tex'), 'SECRET');
 const proj = new Project(safeDir);
 for (const bad of ['../outside.tex', 'sections/../../outside.tex', '', null, 'a/../../..', `../${path.basename(safeDir)}-sibling/x.tex`]) {
   assert.throws(() => proj.abs(bad), /path is required|escapes project/, `should reject ${JSON.stringify(bad)}`);
@@ -213,15 +261,9 @@ for (const bad of ['.review/x', '.git/config', '.claude/settings.local.json']) {
 assert.equal(fs.existsSync(path.join(safeDir, '.review')), false);
 assert.equal(fs.existsSync(path.join(safeDir, '.git')), false);
 
-step('symlink inside the paper pointing outside');
-// Project.abs() is lexical and does not resolve symlinks, so write() follows the link
-// and writes outside the paper folder. Allowed today; not changed in this task.
-// This assertion documents that gap. If it starts failing, the behaviour changed on purpose.
-fs.symlinkSync(path.join(outsideDir, 'secret.tex'), path.join(safeDir, 'link.tex'));
-proj.write('link.tex', 'OVERWRITTEN');
-assert.equal(fs.readFileSync(path.join(outsideDir, 'secret.tex'), 'utf8'), 'OVERWRITTEN');
+// Escaping symlinks have their own step ("path safety: symlinks") further up.
 fs.rmSync(safeDir, { recursive: true, force: true });
-fs.rmSync(outsideDir, { recursive: true, force: true });
+
 step('review store: versioning, backups, corruption');
 {
   const { ReviewStore, CURRENT_VERSION } = await import('../server/review.js');

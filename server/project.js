@@ -17,6 +17,9 @@ export class Project {
     if (!fs.existsSync(this.root) || !fs.statSync(this.root).isDirectory()) {
       throw new Error(`Not a directory: ${this.root}`);
     }
+    // Resolved once: the paper itself may sit behind a symlink (/tmp, /var on macOS).
+    // Containment is checked against this, never against the lexical root.
+    this.realRoot = fs.realpathSync(this.root);
     this.name = path.basename(this.root);
     this.main = main || detectMain(this.root);
   }
@@ -26,7 +29,37 @@ export class Project {
     const cleaned = rel.replace(/\\/g, '/').replace(/^\/+/, '');
     const p = path.resolve(this.root, cleaned);
     if (p !== this.root && !p.startsWith(this.root + path.sep)) throw new Error(`Path escapes project: ${rel}`);
+    this.#checkReal(p, rel);
     return p;
+  }
+
+  // Symlinks must not lead out of the paper folder. The target may not exist yet
+  // (write() creates files and folders), so resolve the longest existing ancestor
+  // and re-append the rest. Applies to reads as well as writes: reading through
+  // an escaping link would leak files via /api/raw and read_file.
+  #checkReal(p, rel) {
+    const real = this.#resolve(p, rel, 0);
+    if (real !== this.realRoot && !real.startsWith(this.realRoot + path.sep)) {
+      throw new Error(`Path escapes project (symlink points outside the paper folder): ${rel}`);
+    }
+  }
+
+  #resolve(p, rel, depth) {
+    if (depth > 40) throw new Error(`Path escapes project (too many symlinks): ${rel}`);
+    try {
+      return fs.realpathSync(p);
+    } catch (e) {
+      if (e.code !== 'ENOENT') throw new Error(`Cannot verify path stays inside the paper folder (${e.code}): ${rel}`);
+    }
+    // ENOENT: either p is missing, or p is a dangling symlink (whose target a write would create).
+    let st = null;
+    try { st = fs.lstatSync(p); } catch (e) { if (e.code !== 'ENOENT' && e.code !== 'ENOTDIR') throw new Error(`Cannot verify path stays inside the paper folder (${e.code}): ${rel}`); }
+    if (st && st.isSymbolicLink()) {
+      return this.#resolve(path.resolve(this.#resolve(path.dirname(p), rel, depth + 1), fs.readlinkSync(p)), rel, depth + 1);
+    }
+    const parent = path.dirname(p);
+    if (parent === p) throw new Error(`Cannot verify path stays inside the paper folder: ${rel}`);
+    return path.join(this.#resolve(parent, rel, depth + 1), path.basename(p));
   }
 
   rel(abs) {
