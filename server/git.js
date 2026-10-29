@@ -2,6 +2,7 @@
 // branch (master), so we commit locally and pull with --rebase before pushing.
 // Credentials come from your own git credential helper (Overleaf git token).
 import { execFile } from 'node:child_process';
+import fs from 'node:fs';
 
 function git(project, args, { timeout = 120000 } = {}) {
   return new Promise((resolve) => {
@@ -61,16 +62,25 @@ export async function sync(project, { message = 'Edits via Margin', push = true 
   if (!(await isRepo(project))) return { ok: false, steps: [{ label: 'check', ok: false, out: 'Not a git repository. Clone your Overleaf project with git first.' }] };
 
   // `git add -A` would stage the conflict markers themselves and push them into the
-  // shared manuscript, so refuse until the author has resolved them.
+  // shared manuscript. But refusing on the index flag alone would be a dead end: editing
+  // the markers out in Margin does not clear it, and Margin has no `git add`. So judge by
+  // the file's contents — markers still there means unresolved, markers gone means the
+  // author (or Claude) has resolved it and only the index is still flagged.
   const unresolved = await conflictedPaths(project);
   if (unresolved.length) {
-    const where = unresolved.join(', ');
-    return {
-      ok: false,
-      conflict: unresolved,
-      hint: `${where} still contains unresolved conflict markers from an earlier pull. Resolve them first (or ask Claude to) — syncing now would push <<<<<<< markers to your co-authors.`,
-      steps: [{ label: 'check', ok: false, out: `unresolved conflict in ${where}` }],
-    };
+    const stillMarked = unresolved.filter((f) => {
+      try { return /^<<<<<<< /m.test(fs.readFileSync(project.abs(f), 'utf8')); } catch { return true; }
+    });
+    if (stillMarked.length) {
+      const where = stillMarked.join(', ');
+      return {
+        ok: false,
+        conflict: stillMarked,
+        hint: `${where} still has unresolved conflict markers from an earlier pull. Edit them out (or ask Claude to), then Sync — syncing now would push <<<<<<< markers to your co-authors.`,
+        steps: [{ label: 'check', ok: false, out: `unresolved conflict in ${where}` }],
+      };
+    }
+    await step('mark resolved', ['add', '--', ...unresolved]);
   }
 
   const st = await git(project, ['status', '--porcelain']);

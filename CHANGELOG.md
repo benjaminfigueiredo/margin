@@ -6,8 +6,9 @@
   fast-forward and then fail to reapply your stashed edits, leaving both versions in the
   file with `<<<<<<<` markers while git still exits 0 — and `behind`/`ahead` both read 0,
   so nothing looked wrong. The next Sync would then have committed those markers and
-  pushed them to your co-authors. A conflicted pull is now reported as one, Sync refuses
-  to stage an unresolved tree, and the status bar names the conflicted file.
+  pushed them to your co-authors. A conflicted pull is now reported as one, the status bar
+  names the conflicted file, and Sync refuses to stage a file that still has markers in it
+  — but goes through as soon as you have edited them out, so you are never stuck.
 - Sync now lists the files it is about to commit and push before asking for a message. It
   stages everything in the paper folder, which was never shown.
 - Fix: `.DS_Store` was in the editor's ignore list but not in the git exclusions, so Sync

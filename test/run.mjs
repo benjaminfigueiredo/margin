@@ -607,6 +607,14 @@ step('git: a conflicted pull is reported, and Sync refuses to commit conflict ma
   assert.doesNotMatch(sh(c.mine, 'log', '-1', '--format=%H'), new RegExp('^$'));
   const pushed = sh(c.mine, 'show', 'origin/master:main.tex');
   assert.doesNotMatch(pushed, /<<<<<<</, 'no conflict markers reached the remote');
+
+  // Editing the markers out does not clear git's unmerged index entry, and Margin has no
+  // `git add`, so refusing on the index flag alone would strand the author for good.
+  fs.writeFileSync(path.join(c.mine, 'main.tex'), 'line one\nMERGED line two\nline three\n');
+  const sr2 = await gSync(new Project(c.mine), { message: 'resolved the conflict' });
+  assert.equal(sr2.ok, true, `Sync must go through once the markers are gone: ${JSON.stringify(sr2)}`);
+  assert.match(sh(c.mine, 'show', 'origin/master:main.tex'), /MERGED line two/, 'the resolved text reached the remote');
+  assert.equal(sh(c.mine, 'status', '--porcelain').trim(), '', 'and the tree is clean afterwards');
   fs.rmSync(c.g, { recursive: true, force: true });
 
   // Sync must not carry OS junk to co-authors either.
