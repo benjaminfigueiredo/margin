@@ -5,6 +5,9 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { checkCitations, lookupDoi, addEntry, searchCrossref, parseBib, formatEntry, bibKeys } from './bib.js';
 import { searchZotero, exportFromZotero } from './zotero.js';
+import { createRequire } from 'node:module';
+
+const { version } = createRequire(import.meta.url)('../package.json');
 
 const text = (t) => ({ content: [{ type: 'text', text: t }] });
 const fail = (e) => ({ isError: true, content: [{ type: 'text', text: e instanceof Error ? e.message : String(e) }] });
@@ -40,7 +43,7 @@ function summarizeCompile(r) {
 
 export function buildMcpServer(ctx) {
   const { project, review } = ctx;
-  const server = new McpServer({ name: 'margin', version: '0.1.0' }, {
+  const server = new McpServer({ name: 'margin', version }, {
     instructions: [
       `You are reviewing the LaTeX manuscript "${project.name}" (main file ${project.main}) alongside the author, who sees your work live in the Margin editor.`,
       'For prose, wording and argument changes, use suggest_edit / add_comment so the author can accept or reject them; do not rewrite prose directly.',

@@ -47,6 +47,8 @@ step('tools/list');
 const { tools } = await client.listTools();
 console.log(tools.map((t) => t.name).join(', '));
 assert.ok(tools.length >= 14);
+const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+assert.equal(client.getServerVersion()?.version, pkg.version, 'the MCP server reports the package version');
 
 step('compile');
 let r = await call('compile');
