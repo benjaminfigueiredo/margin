@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Fix: Margin's own files could be pushed to Overleaf. The guarantee that nothing Margin
+  creates reaches your co-authors depended entirely on `.git/info/exclude`, which only
+  `margin init` wrote — but `margin <dir>` runs fine on a folder that was never inited, and
+  Sync stages everything with `git add -A`. On such a folder, Sync committed and pushed
+  `.margin-build/` and `.review/review.json`, which holds your private review history with
+  Claude. The server now writes those exclusions itself on startup.
 - Fix: accepting a suggestion (or undoing an accept) while the editor had unsaved edits
   could lose work silently. The change was applied to the version on disk, which did not
   include those edits, so the editor and the file diverged with nothing to show it and the

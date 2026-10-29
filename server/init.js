@@ -18,14 +18,8 @@ export function init(dir, { port = 4242, log = console.log } = {}) {
   // 1. Keep Margin's and Claude's files out of git (and therefore out of Overleaf).
   const gitDir = path.join(dir, '.git');
   if (fs.existsSync(gitDir)) {
-    const excludeFile = path.join(gitDir, 'info', 'exclude');
-    fs.mkdirSync(path.dirname(excludeFile), { recursive: true });
-    const current = fs.existsSync(excludeFile) ? fs.readFileSync(excludeFile, 'utf8') : '';
-    const missing = LOCAL_ONLY.filter((p) => !current.split('\n').includes(p));
-    if (missing.length) {
-      fs.appendFileSync(excludeFile, `${current.endsWith('\n') || current === '' ? '' : '\n'}# Margin (local only, never pushed to Overleaf)\n${missing.join('\n')}\n`);
-      done.push(`git: kept ${missing.join(', ')} out of commits (.git/info/exclude)`);
-    }
+    const added = ensureLocalOnlyExcluded(dir);
+    if (added.length) done.push(`git: kept ${added.join(', ')} out of commits (.git/info/exclude)`);
     try {
       const remote = execFileSync('git', ['remote', 'get-url', 'origin'], { cwd: dir }).toString().trim();
       if (!/overleaf\.com/.test(remote)) skipped.push(`origin is ${remote.replace(/\/\/[^@/]+@/, '//')} (not Overleaf) — Sync will push there`);
@@ -68,4 +62,22 @@ function writeIfAbsent(file, content, done, skipped, dir) {
 
 function readJson(file) {
   try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return {}; }
+}
+
+// The promise that nothing Margin creates reaches Overleaf rests entirely on these
+// entries in .git/info/exclude, because git.sync() stages everything with `git add -A`.
+// `margin init` writes them, but `margin <dir>` runs happily on a repo that was never
+// inited, so the server calls this on startup too. Returns the entries it added.
+export function ensureLocalOnlyExcluded(dir) {
+  const gitDir = path.join(dir, '.git');
+  let st;
+  try { st = fs.statSync(gitDir); } catch { return []; }
+  if (!st.isDirectory()) return []; // linked worktree or submodule: .git is a file, not a dir
+  const excludeFile = path.join(gitDir, 'info', 'exclude');
+  const current = fs.existsSync(excludeFile) ? fs.readFileSync(excludeFile, 'utf8') : '';
+  const missing = LOCAL_ONLY.filter((p) => !current.split('\n').includes(p));
+  if (!missing.length) return [];
+  fs.mkdirSync(path.dirname(excludeFile), { recursive: true });
+  fs.appendFileSync(excludeFile, `${current.endsWith('\n') || current === '' ? '' : '\n'}# Margin (local only, never pushed to Overleaf)\n${missing.join('\n')}\n`);
+  return missing;
 }

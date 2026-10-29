@@ -16,6 +16,7 @@ import { compile, forwardSearch, inverseSearch } from './compile.js';
 import * as git from './git.js';
 import { checkCitations } from './bib.js';
 import { buildMcpServer } from './mcp.js';
+import { ensureLocalOnlyExcluded } from './init.js';
 import { countProject } from './wordcount.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -23,6 +24,15 @@ const PUBLIC = path.join(here, '..', 'public');
 
 export async function startServer({ root, port = 4242, main, engine }) {
   const project = new Project(root, { main });
+  // CLAUDE.md: nothing Margin creates may reach Overleaf. git.sync() stages with
+  // `git add -A`, so the local-only paths must be excluded even when `margin init`
+  // was never run on this folder.
+  try {
+    const added = ensureLocalOnlyExcluded(project.root);
+    if (added.length) console.log(`margin: kept ${added.join(', ')} out of git (.git/info/exclude)`);
+  } catch (e) {
+    console.warn(`margin: could not update .git/info/exclude (${e.message}). Run "margin init" before syncing, or Margin's own files may be pushed to Overleaf.`);
+  }
   const config = loadConfig(project);
   if (!main && config.main) project.main = config.main;
   const settings = { engine: engine || config.engine || 'pdflatex', autoCompile: config.autoCompile ?? false };

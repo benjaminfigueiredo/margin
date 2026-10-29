@@ -476,6 +476,29 @@ if (running) {
   fs.rmSync(abs(f), { force: true });
 }
 
+// CLAUDE.md's hardest promise: nothing Margin creates may reach Overleaf. git.sync()
+// stages with `git add -A`, so this holds only if the local-only paths are in
+// .git/info/exclude. This harness never runs `margin init`, so a pass here proves the
+// server itself writes them.
+if (running) {
+  step('local-only paths stay out of git (nothing Margin creates reaches Overleaf)');
+  const paper = path.join(tmp, 'paper');
+  const exclude = fs.readFileSync(path.join(paper, '.git', 'info', 'exclude'), 'utf8').split('\n');
+  for (const e of ['.review/', '.margin-build/', '.claude/', '.mcp.json']) {
+    assert.ok(exclude.includes(e), `${e} is missing from .git/info/exclude`);
+  }
+  // Both folders really exist by now: earlier steps added review items and compiled.
+  assert.ok(fs.existsSync(path.join(paper, '.review')), '.review should exist by now');
+  assert.ok(fs.existsSync(path.join(paper, '.margin-build')), '.margin-build should exist by now');
+  const git = (...a) => execFileSync('git', a, { cwd: paper }).toString();
+  for (const probe of [git('status', '--porcelain'), git('add', '-A', '--dry-run')]) {
+    for (const e of ['.review', '.margin-build', '.mcp.json']) {
+      assert.ok(!probe.includes(e), `git would pick up ${e} and push it to Overleaf:\n${probe}`);
+    }
+  }
+  console.log('excluded; `git add -A` would not stage any of them');
+}
+
 console.log('\nAll checks passed.');
 await client.close();
 if (running) { await running.close(); fs.rmSync(tmp, { recursive: true, force: true }); }
