@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Fix: PDF → source (double-click) failed when the paper folder's path went
+  through a symlink (e.g. macOS `/var` → `/private/var`).
+
 ## 0.1.1 — 2026-10-28
 
 - Fix: Claude Code could not connect on Macs where `localhost` resolves to IPv6.

@@ -186,5 +186,8 @@ export async function inverseSearch(project, page, x, y) {
   // SyncTeX records paths as TeX saw them: absolute, or relative to the project root with "./" and sometimes "/./"
   input = input.replace(/\/\.\//g, '/');
   const absInput = path.isAbsolute(input) ? input : path.resolve(project.root, input);
-  return { file: project.rel(absInput), line: Number(rec.Line), column: Math.max(0, Number(rec.Column)) };
+  // TeX may report the resolved path (macOS: /var -> /private/var), so compare real paths
+  const real = (p) => { try { return fs.realpathSync(p); } catch { return p; } };
+  const file = path.relative(real(project.root), real(absInput)).split(path.sep).join('/');
+  return { file, line: Number(rec.Line), column: Math.max(0, Number(rec.Column)) };
 }
