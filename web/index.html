@@ -140,11 +140,17 @@
         <button id="zoom-out" class="btn sm ghost" aria-label="Zoom out">−</button>
         <button id="zoom-fit" class="btn sm ghost zoom-label"><span id="zoom-label">Fit</span></button>
         <button id="zoom-in" class="btn sm ghost" aria-label="Zoom in">+</button>
+        <div id="pdf-find" class="pdf-find" role="search">
+          <input class="pdf-find-q" type="text" placeholder="Find in PDF" aria-label="Find in PDF" autocomplete="off" spellcheck="false">
+          <span class="pdf-find-count" aria-live="polite"></span>
+          <button class="btn sm ghost pdf-find-prev" aria-label="Previous match" title="Previous match (Shift+Enter)" disabled>↑</button>
+          <button class="btn sm ghost pdf-find-next" aria-label="Next match" title="Next match (Enter)" disabled>↓</button>
+        </div>
         <span class="spacer"></span>
         <span id="page-label" class="page-label"></span>
         <a class="btn sm ghost" href="/pdf" download title="Download PDF">Download</a>
       </div>
-      <div id="pdf-scroll" class="pdf-scroll">
+      <div id="pdf-scroll" class="pdf-scroll" tabindex="-1">
         <div id="pdf-pages" class="pdf-pages"></div>
         <div id="pdf-empty" class="pdf-empty"><p>No PDF yet.</p><p class="fine">Recompile to build it. Double-click the PDF to jump to the source.</p></div>
       </div>

@@ -1,6 +1,7 @@
 import { api, $, $$, h, debounce, toast } from './util.js';
 import { createEditor, selectionInfo } from './editor.js';
 import { createPdfView } from './pdfview.js';
+import { initPdfFind } from './pdffind.js';
 import { createReviewPanel } from './review.js';
 import { initWordCount } from './wordcount.js';
 import { createOutline } from './outline.js';
@@ -332,6 +333,7 @@ $('#btn-forward').addEventListener('click', forwardSearch);
 $('#zoom-in').addEventListener('click', async () => { await pdf.zoomIn(); $('#zoom-label').textContent = pdf.zoomLabel; });
 $('#zoom-out').addEventListener('click', async () => { await pdf.zoomOut(); $('#zoom-label').textContent = pdf.zoomLabel; });
 $('#zoom-fit').addEventListener('click', async () => { await pdf.setZoom('fit'); $('#zoom-label').textContent = pdf.zoomLabel; });
+initPdfFind($('#pdf-find'), pdf, { reveal: () => { showLogs(false); search.close(); } });
 
 // ---------- find in project ----------
 const search = createSearch($('#search'), {

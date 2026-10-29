@@ -12,7 +12,8 @@ Overleaf ⇄ git ⇄ your local repo ⇄ Margin server ⇄ browser UI
 ```
 
 - **Editor**: file tree, LaTeX editor, PDF preview, compile log.
-- **PDF ⇄ source**: double-click the PDF to jump to the source; **→ PDF** (⌘/Ctrl+Alt+→) jumps the other way.
+- **PDF ⇄ source**: double-click the PDF to jump to the source; **→ PDF** (⌘/Ctrl+Alt+→) jumps the other way. Drag over the PDF to select and copy its text.
+- **Find in PDF**: the box in the PDF header searches the compiled text, with a match count, next/previous, and highlights on the page.
 - **Review panel**: Claude's suggestions appear inline as strike-through + insertion and as cards with Accept / Reject / Edit / Reply. Your own comments ("Claude: tighten this?") are requests Claude picks up.
 - **Ask Claude**: select text, press **Ask Claude**, say what you want; your Claude terminal picks it up with your next message, and the card shows *waiting → Claude is on it → answered*, linked to the suggestions Claude made for it.
 - **Split screen**: a compact layout for a short browser window with your Claude terminal underneath.
@@ -116,6 +117,8 @@ In the editor:
 | Comment on selection (for Claude or yourself) | ⌘/Ctrl + Alt + C |
 | Source → PDF | ⌘/Ctrl + Alt + → |
 | PDF → source | double-click the PDF |
+| Select and copy PDF text | drag over the PDF (a double-click also jumps to the source) |
+| Find in the PDF | the box in the PDF header, or ⌘/Ctrl + F with the PDF focused; Enter / Shift+Enter for next / previous, Esc to clear |
 | Compiler / main file / auto-recompile | ▾ next to Recompile |
 | Light / dark theme, editor font size, layout | **Aa** in the top bar (saved per browser) |
 | New file / folder | **+** in the Files pane |
@@ -235,7 +238,11 @@ Overleaf — and the export is a download, not a file in the paper folder.
   Resolve with git (or ask Claude: "resolve the merge conflict in main.tex"),
   then sync again.
 - One person per local copy; this isn't a real-time multi-user editor.
-- No PDF text selection yet; use double-click to jump to the source.
+- PDF text is the text the PDF carries, so a word split by a line-end hyphen is two pieces to
+  PDF search ("underes-" and "timate"), and text drawn as an image or outlined (some figures)
+  can be neither selected nor found. Search highlights can sit a character off on long lines
+  in some fonts; the match count and the jump are exact. A recompile keeps your selection
+  only if the text under it did not change.
 
 ## Changing Margin itself
 

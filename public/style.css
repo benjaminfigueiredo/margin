@@ -565,3 +565,53 @@ body { grid-template-columns: minmax(0, 1fr); }
 :root[data-layout="split"] .wc-panel { bottom: 30px; max-height: calc(100vh - 74px); }
 :root[data-layout="split"] .toasts { bottom: 30px; }
 :root[data-layout="split"] .banner { padding: 3px 8px; }
+
+/* ---------- PDF text layer and search (web/src/pdftext.js, pdfview.js, pdffind.js) ---------- */
+/* The text layer is pdf.js's TextLayer: one transparent span per text item, placed and scaled to
+   sit exactly over the canvas, so the browser can select and copy it. pdf.js computes sizes from
+   --total-scale-factor, which is CSS px per PDF point: pdfview sets --scale-factor on each page. */
+.pdf-page { --scale-factor: 1; --user-unit: 1; --total-scale-factor: calc(var(--scale-factor) * var(--user-unit)); --scale-round-x: 1px; --scale-round-y: 1px; }
+.pdf-scroll:focus { outline: none; }
+.textLayer {
+  position: absolute; inset: 0; overflow: clip; line-height: 1; text-align: initial; letter-spacing: normal; word-spacing: normal;
+  text-size-adjust: none; forced-color-adjust: none; transform-origin: 0 0; z-index: 0;
+  --min-font-size: 1; --text-scale-factor: calc(var(--total-scale-factor) * var(--min-font-size)); --min-font-size-inv: calc(1 / var(--min-font-size));
+}
+.pdf-page .textLayer { width: 100% !important; height: 100% !important; }
+.textLayer :is(span, br) { color: transparent; position: absolute; white-space: pre; cursor: text; transform-origin: 0 0; user-select: text; }
+.textLayer > :not(.markedContent), .textLayer .markedContent span:not(.markedContent) {
+  z-index: 1; --font-height: 0; font-size: calc(var(--text-scale-factor) * var(--font-height));
+  --scale-x: 1; --rotate: 0deg; transform: rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv));
+}
+.textLayer .markedContent { display: contents; }
+.textLayer ::selection { background: color-mix(in srgb, var(--you) 35%, transparent); color: transparent; }
+/* While the pointer is down the end-of-content block covers the layer, so dragging through the gap
+   between two lines extends the selection instead of jumping to the end of the page. */
+.textLayer .endOfContent { display: block; position: absolute; inset: 100% 0 0; z-index: 0; cursor: default; user-select: none; }
+.textLayer.selecting .endOfContent { top: 0; }
+/* Search matches: boxes over the canvas, under the text layer, so they never get in the way of a
+   selection. The page is always white, so the comment tokens (yellow in both themes) read on it. */
+.pdf-hits { position: absolute; inset: 0; pointer-events: none; }
+.pdf-hit { position: absolute; background: var(--comment-active); border-radius: 2px; }
+.pdf-hit.current { background: var(--comment-line); outline: 2px solid var(--warn); }
+.pdf-pane { container-type: inline-size; }
+.pdf-find { display: flex; align-items: center; gap: 2px; min-width: 0; flex: 0 1 280px; margin-left: 6px; }
+.pdf-find-q { flex: 1 1 90px; min-width: 40px; width: 0; padding: 3px 6px; font-weight: 400; background: var(--paper); border: 1px solid var(--line-strong); border-radius: 5px; }
+.pdf-find-q::placeholder { color: var(--muted); }
+.pdf-find-q:focus { outline: none; border-color: var(--accent); }
+.pdf-head .page-label { flex: none; white-space: nowrap; }
+.pdf-find-count { flex: none; padding: 0 4px; font-weight: 400; font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pdf-find-count.none { color: var(--danger); }
+.pdf-find .btn.sm { padding: 3px 6px; }
+:root[data-layout="split"] .pdf-find-q { padding: 1px 6px; }
+:root[data-layout="split"] .pdf-find .btn.sm { padding: 1px 6px; }
+/* A narrow PDF pane drops, in turn, the arrows (Enter / Shift+Enter still step), the page number,
+   and the count, then tighten up; the pane can be dragged down to 280px. */
+@container (max-width: 470px) { .pdf-find-prev, .pdf-find-next { display: none; } }
+@container (max-width: 400px) { .pdf-head .page-label { display: none; } }
+@container (max-width: 360px) { .pdf-find-count { display: none; } }
+@container (max-width: 330px) {
+  .pdf-head { gap: 2px; padding: 0 6px; }
+  .pdf-head .zoom-label { min-width: 0; }
+  .pdf-find { margin-left: 2px; }
+}

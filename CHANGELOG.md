@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- The PDF's text can now be selected and copied, and searched. Drag over the PDF to select
+  (a double-click still jumps to the source; a double-click that turns into a drag selects
+  instead). The new **Find in PDF** box in the PDF header, or ⌘/Ctrl+F while the PDF has focus,
+  counts matches, steps with Enter / Shift+Enter or the arrows, highlights them on the page and
+  scrolls to the current one. Search ignores case and extra spaces and finds a phrase that runs
+  across a line break. Text layers are built only for pages near the view, so a long paper
+  stays responsive. A selection or a search survives a zoom change and a recompile.
 - Security fix: any web page you visited could make Margin act on your paper. The server
   only checked that requests were addressed to localhost, which does not stop a page on
   another site from sending one through your browser, so a malicious or compromised page
