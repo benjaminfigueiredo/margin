@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Fix: accepting a suggestion (or undoing an accept) while the editor had unsaved edits
+  could lose work silently. The change was applied to the version on disk, which did not
+  include those edits, so the editor and the file diverged with nothing to show it and the
+  "changed on disk" banner then overwrote one side or the other. Every review action now
+  saves pending edits first, as compiling, commenting and syncing already did.
 - Fix: the file watcher no longer swallows external changes that land shortly after an autosave.
   It used to treat any change within 1.5 s of a UI save as its own echo, so a write by Claude, a
   `git pull` or another editor in that window produced no reload and no "changed on disk" notice, and

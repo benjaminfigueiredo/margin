@@ -1,7 +1,7 @@
 // Review rail: cards for suggestions and comments, with accept/reject/edit/reply.
 import { api, h, toast, timeAgo, wordDiff } from './util.js';
 
-export function createReviewPanel(root, { getCurrentFile, onFocus, onChanged }) {
+export function createReviewPanel(root, { getCurrentFile, onFocus, onChanged, saveIfDirty }) {
   let items = [];
   let scope = 'file';
   let showClosed = false;
@@ -12,8 +12,12 @@ export function createReviewPanel(root, { getCurrentFile, onFocus, onChanged }) 
   const author = (a) => (a === 'claude' ? h('span', { class: 'avatar claude', title: 'Claude' }, 'C') : h('span', { class: 'avatar you', title: 'You' }, 'Y'));
   const authorName = (a) => (a === 'claude' ? 'Claude' : 'You');
 
+  // Flush pending editor edits before any review action. Accept and Undo rewrite the
+  // source file, so without this the server applies the change to a version of the file
+  // that is missing the author's unsaved edits, and the "changed on disk" banner's
+  // "Keep mine" writes the stale buffer back over the applied change.
   async function act(fn, okMsg) {
-    try { await fn(); if (okMsg) toast(okMsg, 'ok', 1800); await onChanged(); }
+    try { await saveIfDirty?.(); await fn(); if (okMsg) toast(okMsg, 'ok', 1800); await onChanged(); }
     catch (e) { toast(e.message, 'error', 6000); }
   }
 
@@ -83,9 +87,7 @@ export function createReviewPanel(root, { getCurrentFile, onFocus, onChanged }) 
     if (isOpen && !replying.has(it.id)) actions.append(h('button', { class: 'btn sm ghost', onclick: () => { replying.add(it.id); render(); } }, 'Reply'));
     if (!isOpen && it.status !== 'accepted') actions.append(h('button', { class: 'btn sm ghost', onclick: () => act(() => api(`/review/${it.id}/reopen`, { method: 'POST', body: {} })) }, 'Reopen'));
     if (it.status === 'accepted' && it.kind === 'suggestion') {
-      const unsaved = () => document.getElementById('save-state')?.textContent === 'Unsaved';
       actions.append(h('button', { class: 'btn sm ghost', title: 'Put the original text back in the source and reopen this suggestion', onclick: () => {
-        if (unsaved() && !confirm('You have unsaved edits in the editor. Undoing writes the file on disk, so those edits may be lost. Undo this accept anyway?')) return;
         act(() => api(`/review/${it.id}/unaccept`, { method: 'POST', body: {} }), 'Accept undone');
       } }, 'Undo accept'));
     }

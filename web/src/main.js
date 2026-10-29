@@ -166,6 +166,7 @@ const review = createReviewPanel($('#review'), {
   getCurrentFile: () => state.file,
   onFocus: (it) => focusItem(it),
   onChanged: () => refreshReview(),
+  saveIfDirty: () => (state.dirty ? save() : Promise.resolve()),
 });
 
 async function refreshReview() {
