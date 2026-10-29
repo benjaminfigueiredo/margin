@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Security fix: any web page you visited could make Margin act on your paper. The server
+  only checked that requests were addressed to localhost, which does not stop a page on
+  another site from sending one through your browser, so a malicious or compromised page
+  could start a compile, pull from Overleaf, or archive your closed review items. Margin
+  now refuses requests that a browser marks as coming from another site, as its WebSocket
+  already did. Claude Code and the prompt hook are unaffected.
 - File management. **+** in the Files pane makes a new file or folder; right-click a file or
   folder (or use its **⋯**) to rename, delete or reveal it in Finder/Explorer. Drag an image or
   PDF onto the editor and it is uploaded to `figures/` and a `figure` block with

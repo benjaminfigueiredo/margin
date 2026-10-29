@@ -51,6 +51,20 @@ export async function startServer({ root, port = 4242, main, engine }) {
   const allowedHosts = new Set([`127.0.0.1:${port}`, `localhost:${port}`, `[::1]:${port}`]);
   // Guard against DNS rebinding: only answer requests addressed to localhost.
   app.use((req, res, next) => (allowedHosts.has(req.headers.host) ? next() : res.status(403).send('Forbidden host')));
+  // Guard against cross-site requests (CSRF). The Host check does not stop a page on another site
+  // from making the browser send a "simple" POST to 127.0.0.1 without a preflight, which would let
+  // any web page compile, pull, or worse. Browsers label such requests with Origin (every
+  // cross-origin fetch, and every POST) and Sec-Fetch-Site; refuse anything not from Margin's own
+  // page. Claude Code's MCP client and the prompt hook send neither, so they are unaffected.
+  // Plain GET navigations are not checked on Sec-Fetch-Site, so a link to Margin still opens it.
+  app.use((req, res, next) => {
+    const origin = req.headers.origin;
+    if (origin !== undefined && !allowedHosts.has(origin.replace(/^http:\/\//, ''))) return res.status(403).json({ error: 'Cross-site request refused' });
+    const site = req.headers['sec-fetch-site'];
+    const safe = req.method === 'GET' || req.method === 'HEAD';
+    if (!safe && site && site !== 'same-origin' && site !== 'none') return res.status(403).json({ error: 'Cross-site request refused' });
+    next();
+  });
 
   const broadcast = (msg) => {
     const data = JSON.stringify(msg);
@@ -220,7 +234,7 @@ export async function startServer({ root, port = 4242, main, engine }) {
   const onUpgrade = (req, socket, head) => {
     if (!allowedHosts.has(req.headers.host) || !req.url.startsWith('/ws')) { socket.destroy(); return; }
     const origin = req.headers.origin;
-    if (origin && !allowedHosts.has(origin.replace(/^https?:\/\//, ''))) { socket.destroy(); return; }
+    if (origin !== undefined && !allowedHosts.has(origin.replace(/^http:\/\//, ''))) { socket.destroy(); return; }
     wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req));
   };
   server.on('upgrade', onUpgrade);

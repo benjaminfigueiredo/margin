@@ -52,6 +52,22 @@ for (const t of ['suggest_edit', 'suggest_edits']) assert.ok(tools.find((x) => x
 const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 assert.equal(client.getServerVersion()?.version, pkg.version, 'the MCP server reports the package version');
 
+step('cross-site requests are refused (CSRF)');
+{
+  // A page on any other site can make the browser send a "simple" POST (no preflight) to
+  // 127.0.0.1. The Host check does not stop that, so the server must refuse foreign origins.
+  const post = (headers) => fetch(`${base}/api/review/clear-closed`, { method: 'POST', headers: { 'Content-Type': 'text/plain', ...headers }, body: 'x' });
+  assert.equal((await post({ Origin: 'https://evil.example' })).status, 403, 'foreign Origin');
+  assert.equal((await post({ Origin: 'null' })).status, 403, 'opaque Origin (sandboxed frame, file://)');
+  assert.equal((await post({ Origin: 'http://localhost:3000' })).status, 403, 'another local dev server');
+  assert.equal((await post({ 'Sec-Fetch-Site': 'cross-site' })).status, 403, 'no Origin, but the browser says cross-site');
+  assert.equal((await post({ Origin: base })).status, 200, "Margin's own page");
+  assert.equal((await post({ 'Sec-Fetch-Site': 'same-origin' })).status, 200);
+  assert.equal((await fetch(`${base}/api/project`, { headers: { Origin: 'https://evil.example' } })).status, 403, 'reads too');
+  // Claude Code's MCP client and the prompt hook send no Origin: still allowed (the MCP client above already connected).
+  console.log('foreign origins refused; own page, MCP client and non-browser clients allowed');
+}
+
 step('compile');
 let r = await call('compile');
 console.log(r.text);

@@ -46,8 +46,9 @@ The test needs latexmk, bibtex and synctex on PATH.
 - **Nothing Margin creates may reach Overleaf.** Local-only paths are listed in
   `server/init.js` (`LOCAL_ONLY`) and ignored in `server/project.js` (`IGNORED`).
   Keep both lists in sync when adding new local files.
-- **The server listens on 127.0.0.1 and ::1 only** and checks the Host header.
-  Don't loosen this.
+- **The server listens on 127.0.0.1 and ::1 only**, checks the Host header, and
+  refuses requests a browser marks as cross-site (Origin / Sec-Fetch-Site), on
+  HTTP and the WebSocket alike. Don't loosen any of this.
 - **The review store has one writer**: the server process. MCP tools and the UI
   both go through `ReviewStore`; don't write `.review/review.json` directly.
 - **MCP tool changes are user-facing.** Tool names and descriptions are what
