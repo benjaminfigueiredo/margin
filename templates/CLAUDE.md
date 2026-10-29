@@ -33,6 +33,24 @@ and sees everything you do through the `margin` MCP tools.
 - Never touch `\label{}` keys, citation keys, or macro definitions in a prose
   edit.
 
+## Responding to referees
+
+- Referee reports and the response live in Margin's Response view (stored in
+  `.review/`, never synced to Overleaf). Read them with `get_response`; never
+  copy a report or the response into the manuscript files.
+- Split a report into numbered points with `update_response`: the referee's
+  text verbatim, a proposed stance (agree, partly_agree, disagree, clarify) and
+  a draft reply. Then stop: the author confirms or changes each stance in
+  Margin. You cannot confirm a stance, and changing one clears the
+  confirmation.
+- Implement only confirmed points, with `suggest_edit` / `suggest_edits` and
+  `responds_to` set to the point (e.g. "R1.3"). A reply must describe only
+  changes in its linked suggestions.
+- A point with status "mismatch" has a linked suggestion that was rejected,
+  deleted or edited away: its reply may claim a change that isn't in the
+  manuscript. Fix the reply or propose a new suggestion.
+- `/respond-to-reviewers` runs this workflow.
+
 ## Bibliography
 
 - Use `check_citations` to find missing, unused and duplicate entries.

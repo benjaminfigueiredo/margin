@@ -46,7 +46,9 @@ const step = (name) => console.log(`\n── ${name}`);
 step('tools/list');
 const { tools } = await client.listTools();
 console.log(tools.map((t) => t.name).join(', '));
-assert.ok(tools.length >= 14);
+assert.ok(tools.length >= 19);
+for (const t of ['get_response', 'update_response']) assert.ok(tools.some((x) => x.name === t), `${t} is listed`);
+for (const t of ['suggest_edit', 'suggest_edits']) assert.ok(tools.find((x) => x.name === t).inputSchema.properties.responds_to, `${t} takes responds_to`);
 const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 assert.equal(client.getServerVersion()?.version, pkg.version, 'the MCP server reports the package version');
 
@@ -815,6 +817,211 @@ if (running) {
     }
   }
   console.log('excluded; `git add -A` would not stage any of them');
+}
+
+// Response to referees (server/responses.js). Its own server on a fresh git copy of the
+// sample paper, so `git status` can be checked before anything is accepted. The report
+// below is invented for the test.
+step('response to referees: points, stances, linked suggestions, derived status, export, privacy');
+{
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'margin-resp-'));
+  const paper = path.join(dir, 'paper');
+  fs.cpSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'examples', 'sample-paper'), paper, { recursive: true });
+  const git = (...a) => execFileSync('git', ['-c', 'user.name=test', '-c', 'user.email=test@example.org', ...a], { cwd: paper, stdio: 'pipe' }).toString();
+  git('init', '-q'); git('add', '-A'); git('commit', '-qm', 'init');
+  const rport = 45000 + Math.floor(Math.random() * 2000);
+  const srv = await startServer({ root: paper, port: rport });
+  const rbase = `http://127.0.0.1:${rport}`;
+  const rc = new Client({ name: 'margin-test-resp', version: '0' });
+  await rc.connect(new StreamableHTTPClientTransport(new URL(`${rbase}/mcp`)));
+  const rcall = async (name, args = {}) => { const x = await rc.callTool({ name, arguments: args }); return { error: !!x.isError, text: x.content.map((c) => c.text).join('\n') }; };
+  const rrest = async (p, opts = {}) => (await fetch(`${rbase}/api${p}`, { method: opts.method || 'GET', headers: { 'Content-Type': 'application/json' }, body: opts.body ? JSON.stringify(opts.body) : undefined })).json();
+  const pt = async (label) => (await rrest('/responses')).points.find((p) => p.label === label);
+  const paperFiles = () => {
+    const out = [];
+    const walk = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { if (['.git', '.review', '.margin-build'].includes(e.name)) continue; const p = path.join(d, e.name); if (e.isDirectory()) walk(p); else out.push(path.relative(paper, p)); } };
+    walk(paper);
+    return out.sort().join('\n');
+  };
+  const filesBefore = paperFiles();
+
+  const REPORT = [
+    'This invented report exists only for the Margin test suite.',
+    '',
+    '1. The introduction is too long; please shorten the second paragraph.',
+    '2. Why was each heatwave held for 72 hours? This choice needs a justification (50% of events are shorter).',
+    '3. The survival model should be stated in words as well as in Eq. 1.',
+  ].join('\n');
+
+  let x = await rcall('get_response');
+  assert.ok(!x.error && /No referee report yet/.test(x.text), x.text);
+
+  // The author pastes the report in the Response view.
+  const report = await rrest('/responses/reports', { method: 'POST', body: { reviewer: 'Reviewer 1', text: REPORT } });
+  assert.equal(report.round, 1);
+  x = await rcall('get_response');
+  assert.match(x.text, /invented report exists only/, 'get_response returns the report text');
+
+  // Claude splits it into points with proposed stances. It cannot confirm them.
+  x = await rcall('update_response', { points: [
+    { referee_text: 'The introduction is too long; please shorten the second paragraph.', stance: 'agree', reply: 'We shortened the second paragraph of the Introduction.' },
+    { referee_text: 'Why was each heatwave held for 72 hours? This choice needs a justification (50% of events are shorter).', stance: 'clarify', reply: 'Seventy-two hours is the median duration of recent events in the region; we now say so in the Methods.', confirmed: true },
+    { referee_text: 'The survival model should be stated in words as well as in Eq. 1.', stance: 'partly_agree', reply: 'We now describe the model in words.' },
+  ] });
+  assert.ok(!x.error, x.text);
+  assert.match(x.text, /created R1\.1/); assert.match(x.text, /created R1\.3/);
+  let v = await rrest('/responses');
+  assert.deepEqual(v.points.map((p) => p.label), ['R1.1', 'R1.2', 'R1.3']);
+  assert.ok(v.points.every((p) => !p.confirmed), 'Claude cannot confirm a stance');
+  assert.ok(v.points.every((p) => p.status === 'pending' && p.reasons.includes('stance not confirmed by the author')));
+  x = await rcall('get_response', { report_text: false });
+  assert.match(x.text, /Waiting for the author to confirm the stance on: R1\.1, R1\.2, R1\.3/);
+
+  // No edits for a point whose stance the author has not confirmed.
+  x = await rcall('suggest_edit', { file: 'sections/intro.tex', original: 'it is not well known how', replacement: 'little is known about how', rationale: 'Shorter.', responds_to: 'R1.1' });
+  assert.ok(x.error && /not confirmed/.test(x.text), x.text);
+  assert.equal((await rrest('/review')).length, 0, 'and no suggestion was created');
+
+  // The author confirms R1.1 and R1.2 and changes R1.3 to agree (which confirms it).
+  await rrest(`/responses/points/${(await pt('R1.1')).id}`, { method: 'POST', body: { confirmed: true } });
+  await rrest(`/responses/points/${(await pt('R1.2')).id}`, { method: 'POST', body: { confirmed: true } });
+  await rrest(`/responses/points/${(await pt('R1.3')).id}`, { method: 'POST', body: { stance: 'agree' } });
+  assert.equal((await pt('R1.3')).confirmed, true);
+  assert.equal((await pt('R1.2')).status, 'done', 'a confirmed clarify point with a reply needs no linked change');
+  assert.deepEqual((await pt('R1.1')).reasons, ['no suggestion linked yet']);
+
+  // Claude implements R1.1 with two suggestions and R1.3 with one.
+  x = await rcall('suggest_edit', { file: 'sections/intro.tex', original: 'it is not well known how', replacement: 'little is known about how', rationale: 'Shorter.', responds_to: 'R1.1' });
+  assert.ok(!x.error && /linked to R1\.1/.test(x.text), x.text);
+  x = await rcall('suggest_edits', { responds_to: 'R1.1', edits: [
+    { file: 'sections/intro.tex', original: 'which may underestimate cumulative effects', replacement: 'which may miss cumulative effects', rationale: 'Shorter.' },
+    { file: 'sections/methods.tex', original: 'Survival was modelled as', replacement: 'Survival was modelled as a logistic mixed model,', rationale: 'States the model in words.', responds_to: (await pt('R1.3')).id.slice(0, 8) },
+  ] });
+  assert.ok(!x.error && !/FAILED/.test(x.text), x.text);
+  const items = await rrest('/review');
+  const sA = items.find((i) => i.quote === 'it is not well known how').id;
+  const sB = items.find((i) => i.quote.startsWith('which may')).id;
+  const sC = items.find((i) => i.file === 'sections/methods.tex').id;
+  assert.deepEqual((await pt('R1.1')).itemIds, [sA, sB]);
+  assert.deepEqual((await pt('R1.3')).itemIds, [sC]);
+  assert.deepEqual((await pt('R1.1')).reasons, ['2 linked suggestions still open']);
+
+  // Privacy: everything so far (report, points, links, both exports) left the paper's git status clean.
+  const md = await (await fetch(`${rbase}/api/responses/export?format=md`)).text();
+  const texRes = await fetch(`${rbase}/api/responses/export?format=tex`);
+  assert.match(texRes.headers.get('content-disposition') || '', /attachment; filename="response-to-reviewers\.tex"/);
+  const tex = await texRes.text();
+  assert.equal(git('status', '--porcelain'), '', 'the response feature must leave nothing for git to pick up');
+  assert.equal(paperFiles(), filesBefore, 'export is a download only: no new file in the paper folder');
+  assert.ok(fs.existsSync(path.join(paper, '.review', 'responses.json')), 'stored in .review/responses.json');
+  assert.equal(JSON.parse(fs.readFileSync(path.join(paper, '.review', 'responses.json'), 'utf8')).version, 1);
+
+  // Export: numbered, the referee quoted, the reply under it, in order.
+  assert.match(md, /^# Response to the reviewers\n\n## Reviewer 1\n\n### Comment 1\.1\n\n> The introduction is too long; please shorten the second paragraph\.\n\n\*\*Response\.\*\* We shortened the second paragraph/);
+  assert.ok(md.indexOf('Comment 1.1') < md.indexOf('Comment 1.2') && md.indexOf('Comment 1.2') < md.indexOf('Comment 1.3'));
+  assert.match(md, /### Comment 1\.2\n\n> Why was each heatwave held for 72 hours\? This choice needs a justification \(50% of events are shorter\)\.\n\n\*\*Response\.\*\* Seventy-two hours/);
+  assert.match(tex, /\\paragraph\{Comment 1\.2\}\n\\begin\{referee\}\nWhy was each heatwave held for 72 hours\? This choice needs a justification \(50\\% of events are shorter\)\.\n\\end\{referee\}\n\\textbf\{Response\.\} Seventy-two hours/);
+  // And the LaTeX letter compiles on its own (outside the paper folder).
+  const texDir = fs.mkdtempSync(path.join(os.tmpdir(), 'margin-letter-'));
+  fs.writeFileSync(path.join(texDir, 'letter.tex'), tex);
+  execFileSync('pdflatex', ['-interaction=nonstopmode', '-halt-on-error', 'letter.tex'], { cwd: texDir, stdio: 'pipe' });
+  assert.ok(fs.existsSync(path.join(texDir, 'letter.pdf')));
+  fs.rmSync(texDir, { recursive: true, force: true });
+
+  // Derived status follows the suggestions: accept one -> still pending; both -> done.
+  await rrest(`/review/${sA}/accept`, { method: 'POST', body: {} });
+  assert.deepEqual((await pt('R1.1')).reasons, ['1 linked suggestion still open']);
+  await rrest(`/review/${sB}/accept`, { method: 'POST', body: {} });
+  assert.equal((await pt('R1.1')).status, 'done');
+  // Undoing an accept puts it back to pending.
+  await rrest(`/review/${sB}/unaccept`, { method: 'POST', body: {} });
+  assert.equal((await pt('R1.1')).status, 'pending');
+  await rrest(`/review/${sB}/accept`, { method: 'POST', body: {} });
+  assert.equal((await pt('R1.1')).status, 'done');
+  // Editing the accepted text away later is a mismatch: the reply claims a change that is gone.
+  const intro = (await rrest('/file?path=sections/intro.tex')).content;
+  await rrest('/file?path=sections/intro.tex', { method: 'PUT', body: { content: intro.replace('which may miss cumulative effects', 'which may underestimate cumulative effects') } });
+  const p1 = await pt('R1.1');
+  assert.equal(p1.status, 'mismatch');
+  assert.match(p1.reasons[0], /accepted, but its text is no longer in sections\/intro\.tex/);
+  await rrest('/file?path=sections/intro.tex', { method: 'PUT', body: { content: intro } });
+  assert.equal((await pt('R1.1')).status, 'done');
+
+  // Rejecting a linked suggestion is a mismatch, and get_response says so plainly.
+  await rrest(`/review/${sC}/reject`, { method: 'POST', body: {} });
+  let p3 = await pt('R1.3');
+  assert.equal(p3.status, 'mismatch');
+  assert.match(p3.reasons[0], /was rejected/);
+  x = await rcall('get_response', { report_text: false });
+  assert.match(x.text, /R1\.3 \[\w+\] — Agree \(confirmed by the author\) — MISMATCH: suggestion \w+ was rejected/);
+  assert.match(x.text, /1 mismatch/);
+  assert.equal((await rrest('/responses')).mismatchAll, 1);
+  // Reopened and then orphaned (its text edited away): still a mismatch.
+  await rrest(`/review/${sC}/reopen`, { method: 'POST', body: {} });
+  assert.equal((await pt('R1.3')).status, 'pending');
+  const methods = (await rrest('/file?path=sections/methods.tex')).content;
+  await rrest('/file?path=sections/methods.tex', { method: 'PUT', body: { content: methods.replace('Survival was modelled as', 'Survival was fitted as') } });
+  p3 = await pt('R1.3');
+  assert.equal(p3.status, 'mismatch'); assert.match(p3.reasons[0], /edited since/);
+  // Deleted outright: a mismatch too. Unlinking clears it.
+  await rrest(`/review/${sC}`, { method: 'DELETE' });
+  p3 = await pt('R1.3');
+  assert.equal(p3.status, 'mismatch'); assert.match(p3.reasons[0], /was deleted/);
+  x = await rcall('update_response', { points: [{ point: 'R1.3', unlink: [sC.slice(0, 8)] }] });
+  assert.ok(!x.error && /revised R1\.3/.test(x.text), x.text);
+  assert.deepEqual((await pt('R1.3')).reasons, ['no suggestion linked yet']);
+
+  // Archived accepted suggestions (Clear closed) still count as accepted.
+  await rrest('/review/clear-closed', { method: 'POST' });
+  assert.equal((await pt('R1.1')).status, 'done');
+  assert.ok((await pt('R1.1')).links.every((l) => l.archived && l.status === 'accepted'));
+
+  // Claude changing a confirmed stance clears the confirmation; revising the reply does not.
+  await rcall('update_response', { points: [{ point: 'R1.2', reply: 'Seventy-two hours matches the median event duration.' }] });
+  assert.equal((await pt('R1.2')).confirmed, true);
+  x = await rcall('update_response', { points: [{ point: 'R1.2', stance: 'disagree' }] });
+  assert.match(x.text, /awaiting the author's confirmation/);
+  assert.equal((await pt('R1.2')).confirmed, false);
+  assert.equal((await pt('R1.2')).status, 'pending');
+
+  // Claude can save a report pasted in the terminal and number its points.
+  x = await rcall('update_response', { report: { reviewer: 'Reviewer 2', text: 'Invented second report.\n1. Figure 2 needs units.' }, points: [{ referee_text: 'Figure 2 needs units.', stance: 'agree', reply: 'Added.' }] });
+  assert.ok(!x.error && /created R2\.1/.test(x.text), x.text);
+  x = await rcall('update_response', { points: [{ referee_text: 'No report given and two exist' }] });
+  assert.match(x.text, /FAILED: There are several reports/);
+  x = await rcall('update_response', { points: [{ point: 'R2.1', delete: true }] });
+  assert.match(x.text, /deleted R2\.1/);
+
+  await rc.close();
+  await srv.close();
+  fs.rmSync(dir, { recursive: true, force: true });
+  console.log('statuses follow the suggestions (accept, undo, reject, edit, delete, archive); export numbered and quoted; git status clean');
+}
+
+step('response store: versioning, corruption, backups');
+{
+  const { ReviewStore } = await import('../server/review.js');
+  const mk = () => fs.mkdtempSync(path.join(os.tmpdir(), 'margin-rsp-'));
+  const rp = (d) => path.join(d, '.review', 'responses.json');
+  const storeIn = (d) => new ReviewStore({ reviewDir: path.join(d, '.review'), read: () => '' });
+  const put = (d, s) => { fs.mkdirSync(path.join(d, '.review'), { recursive: true }); fs.writeFileSync(rp(d), s); };
+  // too new: refused, untouched
+  let d = mk(); const future = JSON.stringify({ version: 99, reports: [], points: [] });
+  put(d, future);
+  assert.throws(() => storeIn(d), (e) => e.message.includes(rp(d)) && /newer version of Margin/.test(e.message) && /response format 99/.test(e.message));
+  assert.equal(fs.readFileSync(rp(d), 'utf8'), future);
+  // unreadable: moved aside, not overwritten
+  d = mk(); put(d, '{"version":1,"reports":[');
+  const warn = console.warn; console.warn = () => {};
+  let s; try { s = storeIn(d); } finally { console.warn = warn; }
+  assert.equal(s.responses.data.points.length, 0);
+  assert.ok(!fs.existsSync(rp(d)));
+  assert.equal(fs.readdirSync(path.join(d, '.review')).filter((f) => f.startsWith('responses.json.corrupt-')).length, 1);
+  // saves keep backups, like review.json, and do not touch review.json
+  s.responses.addReport({ reviewer: 'Reviewer 1', text: 'Invented.' });
+  s.responses.addReport({ reviewer: 'Reviewer 2', text: 'Invented too.' });
+  assert.equal(JSON.parse(fs.readFileSync(rp(d) + '.bak', 'utf8')).reports.length, 1);
+  assert.ok(!fs.existsSync(path.join(d, '.review', 'review.json')));
 }
 
 step('git: fetch makes status().behind real; timer only with a remote, cleared by close()');

@@ -6,6 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { EventEmitter } from 'node:events';
+import { ResponseStore } from './responses.js';
 
 const CONTEXT = 48;
 
@@ -24,59 +25,62 @@ const MIGRATIONS = {
 };
 const BACKUPS_KEPT = 3;
 
-export class ReviewStore extends EventEmitter {
-  constructor(project) {
-    super();
-    this.project = project;
-    this.file = path.join(project.reviewDir, 'review.json');
-    this.data = { version: CURRENT_VERSION, items: [] };
-    this.load();
+// A JSON file under .review/ with a `version` field, migrations, rotating backups and
+// quarantine of unreadable files. review.json (below) and responses.json (responses.js)
+// both use it, so the two get exactly the same protections. Owned by ReviewStore, which
+// stays the only writer of .review/.
+export class VersionedJsonFile {
+  // what: the name used in messages ("review", "response"); check(raw) returns why the
+  // parsed data is unusable, or null if it is fine.
+  constructor(file, { version, migrations, check, what }) {
+    Object.assign(this, { file, version, migrations, check, what });
   }
 
-  // Throws (with a message naming the file) if the file is from a newer Margin;
-  // startServer propagates that and bin/margin.js prints it and exits 1.
+  // Returns { data, migrated } or null when there is nothing to load (first run, or the
+  // file was unreadable and has been moved aside). Throws (with a message naming the
+  // file) if the file is from a newer Margin; startServer propagates that and
+  // bin/margin.js prints it and exits 1.
   load() {
     let text;
     try { text = fs.readFileSync(this.file, 'utf8'); } catch (e) {
-      if (e.code === 'ENOENT') return; // first run
+      if (e.code === 'ENOENT') return null; // first run
       throw new Error(`Cannot read ${this.file}: ${e.message}`);
     }
     let raw;
     try {
       raw = JSON.parse(text);
-      if (!raw || typeof raw !== 'object' || !Array.isArray(raw.items)) throw new Error('no items array');
+      const problem = !raw || typeof raw !== 'object' ? 'not an object' : this.check(raw);
+      if (problem) throw new Error(problem);
     } catch (e) {
       const aside = `${this.file}.corrupt-${new Date().toISOString().replace(/[:.]/g, '-')}`;
       fs.renameSync(this.file, aside);
-      console.warn(`margin: ${this.file} could not be read (${e.message}). Moved it to ${aside}; starting with an empty review. Recover by hand from that file or from review.json.bak*.`);
-      return;
+      console.warn(`margin: ${this.file} could not be read (${e.message}). Moved it to ${aside}; starting with an empty ${this.what}. Recover by hand from that file or from ${path.basename(this.file)}.bak*.`);
+      return null;
     }
     let v = Number.isInteger(raw.version) ? raw.version : 0;
-    if (v > CURRENT_VERSION) {
-      throw new Error(`${this.file} was written by a newer version of Margin (review format ${v}; this build understands up to ${CURRENT_VERSION}). Update Margin to open this paper. The file has not been modified.`);
+    if (v > this.version) {
+      throw new Error(`${this.file} was written by a newer version of Margin (${this.what} format ${v}; this build understands up to ${this.version}). Update Margin to open this paper. The file has not been modified.`);
     }
-    const migrated = v < CURRENT_VERSION;
-    while (v < CURRENT_VERSION) {
-      const m = MIGRATIONS[v];
-      if (!m) throw new Error(`${this.file}: no migration from review format ${v}. The file has not been modified.`);
+    const migrated = v < this.version;
+    while (v < this.version) {
+      const m = this.migrations[v];
+      if (!m) throw new Error(`${this.file}: no migration from ${this.what} format ${v}. The file has not been modified.`);
       raw = m(raw);
       v = raw.version;
     }
-    this.data = raw;
-    if (migrated) this.save(); // save() keeps the pre-migration file as a backup
+    return { data: raw, migrated }; // the caller saves a migrated file; save() keeps the old one as a backup
   }
 
-  save() {
+  save(data) {
     fs.mkdirSync(path.dirname(this.file), { recursive: true });
     const tmp = this.file + '.tmp';
-    fs.writeFileSync(tmp, JSON.stringify(this.data, null, 2));
+    fs.writeFileSync(tmp, JSON.stringify(data, null, 2));
     this.rotateBackups();
-    fs.renameSync(tmp, this.file); // atomic; review.json is never missing or partial
-    this.emit('change');
+    fs.renameSync(tmp, this.file); // atomic; the file is never missing or partial
   }
 
-  // Keep the last BACKUPS_KEPT versions: review.json.bak (newest), .bak2, .bak3.
-  // Copies, not renames, so review.json stays in place until the atomic rename.
+  // Keep the last BACKUPS_KEPT versions: <file>.bak (newest), .bak2, .bak3.
+  // Copies, not renames, so the file stays in place until the atomic rename.
   rotateBackups() {
     if (!fs.existsSync(this.file)) return;
     for (let i = BACKUPS_KEPT; i >= 2; i--) {
@@ -84,6 +88,34 @@ export class ReviewStore extends EventEmitter {
       if (fs.existsSync(from)) fs.copyFileSync(from, this.file + `.bak${i}`);
     }
     fs.copyFileSync(this.file, this.file + '.bak');
+  }
+}
+
+export class ReviewStore extends EventEmitter {
+  constructor(project) {
+    super();
+    this.project = project;
+    this.file = path.join(project.reviewDir, 'review.json');
+    this.store = new VersionedJsonFile(this.file, {
+      version: CURRENT_VERSION, migrations: MIGRATIONS, what: 'review',
+      check: (raw) => (Array.isArray(raw.items) ? null : 'no items array'),
+    });
+    this.data = { version: CURRENT_VERSION, items: [] };
+    this.load();
+    // The response to referees (.review/responses.json): a separate file, same writer.
+    this.responses = new ResponseStore(this);
+  }
+
+  load() {
+    const r = this.store.load();
+    if (!r) return;
+    this.data = r.data;
+    if (r.migrated) this.save();
+  }
+
+  save() {
+    this.store.save(this.data);
+    this.emit('change');
   }
 
   get(id) {
@@ -340,7 +372,7 @@ export function locate(item, text) {
 // Non-empty replacements reuse findAll/locate with the item's original context and the
 // offset recorded at accept time. A deletion leaves nothing to match, so the gap is found
 // between the surrounding context instead (shrinking the window if that context was edited).
-function locateApplied(item, text) {
+export function locateApplied(item, text) {
   const applied = item.appliedReplacement ?? '';
   const core = applied.trim();
   if (core) {
