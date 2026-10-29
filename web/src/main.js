@@ -384,9 +384,13 @@ async function refreshGit() {
     // If the fetch keeps failing, "to pull" is stale: say so instead of looking up to date.
     const unreachable = g.remoteCheck && g.remoteCheck.failures > 1;
     if (unreachable) bits.push("can't reach Overleaf");
+    // A branch with no upstream has no "to pull" at all; without this it looks up to date.
+    const untracked = g.remote && g.tracking === false;
+    if (untracked) bits.push('not tracking Overleaf');
     if (g.conflicted?.length) bits.push(`unresolved conflict in ${g.conflicted.join(', ')}`);
     el.textContent = bits.join(' · ');
-    el.title = unreachable ? `Last fetch failed, so "to pull" may be out of date: ${g.remoteCheck.error}` : (g.remote || '');
+    el.title = untracked ? `"${g.branch}" has no upstream, so co-authors' changes are not shown here and Sync cannot push. Overleaf supports one branch: switch back with "git checkout master".`
+      : unreachable ? `Last fetch failed, so "to pull" may be out of date: ${g.remoteCheck.error}` : (g.remote || '');
   } catch { /* ignore */ }
 }
 

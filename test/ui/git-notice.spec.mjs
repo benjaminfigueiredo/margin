@@ -64,3 +64,13 @@ test('a commit to a different file gets the generic notice, which can be dismiss
   await banner.getByRole('button', { name: 'Dismiss' }).click();
   await expect(banner).toBeHidden();
 });
+
+test('a branch that tracks nothing on Overleaf says so instead of looking up to date', async ({ page, remote }) => {
+  sh(remote.mine, 'checkout', '-qb', 'my-edits');
+  await page.goto(remote.baseURL + '/');
+  await expect(page.locator('#conn')).toHaveClass(/\bon\b/);
+  const st = page.locator('#git-status');
+  await expect(st).toContainText('my-edits');
+  await expect(st).toContainText('not tracking Overleaf');
+  await expect(st).toHaveAttribute('title', /master/);
+});

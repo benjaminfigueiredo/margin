@@ -46,6 +46,9 @@ export async function status(project) {
     changed,
     ahead,
     behind,
+    // False when the branch has no upstream: behind/ahead are then null, not 0, and must not
+    // read as "up to date" (Overleaf only knows master, so nothing there will ever show up).
+    tracking: upstream.ok,
     incoming,
     conflicted,
   };

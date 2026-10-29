@@ -638,9 +638,30 @@ step('git: a conflicted pull is reported, and Sync refuses to commit conflict ma
   assert.match(ur.hint || '', /my-edits/, 'the hint names the branch');
   assert.match(ur.hint || '', /master/, 'and points back to the branch Overleaf supports');
   assert.match(sh(u.mine, 'log', '-1', '--format=%s'), /on a side branch/, 'the commit is kept locally');
+  // status() must tell "no upstream" apart from "up to date": behind/ahead are null then, and
+  // the status bar showed nothing, exactly as for a branch with nothing to pull.
+  assert.equal((await gStatus(new Project(u.mine))).tracking, false, 'a branch with no upstream is reported as such');
+  sh(u.mine, 'checkout', '-q', 'master');
+  assert.equal((await gStatus(new Project(u.mine))).tracking, true);
   fs.rmSync(u.g, { recursive: true, force: true });
 
-  console.log('conflicted pull reported, Sync refuses it, junk stays local, no-upstream explained');
+  // A pull that git refuses because of local files: a co-author added a file at a path where
+  // the author has an untracked file of their own. --autostash does not cover untracked files,
+  // so git aborts. The pull must fail with git's message (the UI toasts it), and the author's
+  // file must be untouched.
+  const l = mk();
+  fs.writeFileSync(path.join(l.theirs, 'notes.tex'), 'theirs\n');
+  sh(l.theirs, 'add', '-A'); sh(l.theirs, 'commit', '-qm', 'co-author adds notes'); sh(l.theirs, 'push', '-q');
+  fs.writeFileSync(path.join(l.mine, 'notes.tex'), 'my own notes\n');
+  const lr = await gPull(new Project(l.mine));
+  assert.equal(lr.ok, false, 'a refused pull must not report success');
+  assert.ok(!lr.conflict, 'and is not reported as a conflict');
+  assert.match(lr.out, /notes\.tex/, "git's message, naming the file, is passed through");
+  assert.match(lr.out, /overwritten/);
+  assert.equal(fs.readFileSync(path.join(l.mine, 'notes.tex'), 'utf8'), 'my own notes\n', "the author's file is untouched");
+  fs.rmSync(l.g, { recursive: true, force: true });
+
+  console.log('conflicted pull reported, Sync refuses it, junk stays local, no-upstream explained, refused pull passes git\'s reason');
 }
 
 console.log('\nAll checks passed.');

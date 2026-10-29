@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Fix: on a branch that tracks nothing on Overleaf, the status bar showed no "to pull" count,
+  which looked exactly like being up to date. It now says "not tracking Overleaf", and the
+  tooltip explains how to get back to `master`.
 - Fix: a pull that conflicted reported success. `git pull --rebase --autostash` can
   fast-forward and then fail to reapply your stashed edits, leaving both versions in the
   file with `<<<<<<<` markers while git still exits 0 — and `behind`/`ahead` both read 0,
