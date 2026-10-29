@@ -8,7 +8,7 @@ import { execFileSync } from 'node:child_process';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const TEMPLATES = path.join(here, '..', 'templates');
-const LOCAL_ONLY = ['.review/', '.margin-build/', '.claude/', '.mcp.json'];
+const LOCAL_ONLY = ['.review/', '.margin-build/', '.claude/', '.mcp.json', '.DS_Store'];
 
 export function init(dir, { port = 4242, log = console.log } = {}) {
   if (!fs.existsSync(dir)) throw new Error(`No such folder: ${dir}`);

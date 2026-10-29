@@ -24,7 +24,11 @@ export async function status(project) {
     git(project, ['remote', 'get-url', 'origin']),
     git(project, ['rev-list', '--left-right', '--count', '@{u}...HEAD']),
   ]);
-  const changed = porcelain.stdout.split('\n').filter(Boolean).map((l) => ({ status: l.slice(0, 2).trim(), path: l.slice(3) }));
+  const rawStatus = porcelain.stdout.split('\n').filter(Boolean);
+  const changed = rawStatus.map((l) => ({ status: l.slice(0, 2).trim(), path: l.slice(3) }));
+  // Unmerged porcelain codes. behind/ahead are both 0 while a conflict is unresolved,
+  // so this is the only thing that distinguishes a conflicted tree from a clean one.
+  const conflicted = rawStatus.filter((l) => UNMERGED.has(l.slice(0, 2))).map((l) => l.slice(3));
   let behind = null; let ahead = null;
   let incoming = [];
   if (upstream.ok) [behind, ahead] = upstream.stdout.trim().split(/\s+/).map(Number);
@@ -42,8 +46,11 @@ export async function status(project) {
     ahead,
     behind,
     incoming,
+    conflicted,
   };
 }
+
+const UNMERGED = new Set(['DD', 'AU', 'UD', 'UA', 'DU', 'AA', 'UU']);
 
 function redact(url) { return url.replace(/\/\/[^@/]+@/, '//'); }
 
@@ -52,6 +59,19 @@ export async function sync(project, { message = 'Edits via Margin', push = true 
   const steps = [];
   const step = async (label, args) => { const r = await git(project, args); steps.push({ label, ok: r.ok, out: (r.stdout + r.stderr).trim() }); return r; };
   if (!(await isRepo(project))) return { ok: false, steps: [{ label: 'check', ok: false, out: 'Not a git repository. Clone your Overleaf project with git first.' }] };
+
+  // `git add -A` would stage the conflict markers themselves and push them into the
+  // shared manuscript, so refuse until the author has resolved them.
+  const unresolved = await conflictedPaths(project);
+  if (unresolved.length) {
+    const where = unresolved.join(', ');
+    return {
+      ok: false,
+      conflict: unresolved,
+      hint: `${where} still contains unresolved conflict markers from an earlier pull. Resolve them first (or ask Claude to) — syncing now would push <<<<<<< markers to your co-authors.`,
+      steps: [{ label: 'check', ok: false, out: `unresolved conflict in ${where}` }],
+    };
+  }
 
   const st = await git(project, ['status', '--porcelain']);
   if (st.stdout.trim()) {
@@ -64,6 +84,12 @@ export async function sync(project, { message = 'Edits via Margin', push = true 
 
   const pull = await step('pull', ['pull', '--rebase', '--autostash']);
   if (!pull.ok) {
+    // Overleaf supports one branch, so a branch with no upstream is a dead end. Say that
+    // instead of passing git's "There is no tracking information" through to a toast.
+    if (/no tracking information|no upstream/i.test(pull.stdout + pull.stderr)) {
+      const b = (await git(project, ['rev-parse', '--abbrev-ref', 'HEAD'])).stdout.trim();
+      return { ok: false, steps, hint: `The branch "${b}" is not tracking anything on Overleaf, which only supports one branch (master). Your commit is safe on "${b}"; switch back with "git checkout master" and sync from there.` };
+    }
     const conflicted = (await git(project, ['diff', '--name-only', '--diff-filter=U'])).stdout.trim();
     if (conflicted) {
       await step('abort rebase', ['rebase', '--abort']);
@@ -80,7 +106,24 @@ export async function sync(project, { message = 'Edits via Margin', push = true 
 
 export async function pull(project) {
   const r = await git(project, ['pull', '--rebase', '--autostash']);
+  // --autostash can fast-forward successfully and then fail to reapply the stash, which
+  // leaves both versions in the file with conflict markers while git still exits 0. That
+  // must not read as success: the next Sync would commit the markers and push them.
+  const unresolved = await conflictedPaths(project);
+  if (unresolved.length) {
+    return {
+      ok: false,
+      conflict: unresolved,
+      out: (r.stdout + r.stderr).trim(),
+      hint: `Overleaf's changes and your own edits both touch ${unresolved.join(', ')}. Both versions are in the file now, marked with <<<<<<< and >>>>>>>. Edit it to keep what you want (or ask Claude to), then Sync. Your version is also kept in "git stash".`,
+    };
+  }
   return { ok: r.ok, out: (r.stdout + r.stderr).trim() };
+}
+
+async function conflictedPaths(project) {
+  const r = await git(project, ['diff', '--name-only', '--diff-filter=U']);
+  return r.ok ? r.stdout.split('\n').filter(Boolean) : [];
 }
 
 // Update remote-tracking refs so status().behind reflects what co-authors pushed. Without this

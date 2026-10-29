@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- Fix: a pull that conflicted reported success. `git pull --rebase --autostash` can
+  fast-forward and then fail to reapply your stashed edits, leaving both versions in the
+  file with `<<<<<<<` markers while git still exits 0 — and `behind`/`ahead` both read 0,
+  so nothing looked wrong. The next Sync would then have committed those markers and
+  pushed them to your co-authors. A conflicted pull is now reported as one, Sync refuses
+  to stage an unresolved tree, and the status bar names the conflicted file.
+- Sync now lists the files it is about to commit and push before asking for a message. It
+  stages everything in the paper folder, which was never shown.
+- Fix: `.DS_Store` was in the editor's ignore list but not in the git exclusions, so Sync
+  pushed it to Overleaf.
+- Syncing from a branch with no upstream now explains that Overleaf supports only one
+  branch, instead of passing git's "no tracking information" through to a toast.
 - Fix: when the background fetch keeps failing (an expired Overleaf token, offline, revoked
   access) the status bar said "Overleaf · master" with no "to pull", which is
   indistinguishable from being up to date — the same stale-`behind` lie the fetch was added

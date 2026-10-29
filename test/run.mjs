@@ -559,6 +559,82 @@ step('git: fetch makes status().behind real; timer only with a remote, cleared b
   console.log('fetch updates behind; failing fetch is silent; timer absent without remote and cleared on close');
 }
 
+step('git: a conflicted pull is reported, and Sync refuses to commit conflict markers');
+{
+  const { pull: gPull, sync: gSync, status: gStatus } = await import('../server/git.js');
+  const { ensureLocalOnlyExcluded } = await import('../server/init.js');
+  const sh = (cwd, ...a) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@e', ...a], { cwd, stdio: 'pipe' }).toString();
+  const mk = () => {
+    const g = fs.mkdtempSync(path.join(os.tmpdir(), 'margin-conflict-'));
+    const bare = path.join(g, 'remote.git');
+    sh(g, 'init', '-q', '--bare', '-b', 'master', bare);
+    const mine = path.join(g, 'mine'), theirs = path.join(g, 'theirs');
+    sh(g, 'clone', '-q', bare, mine);
+    fs.writeFileSync(path.join(mine, 'main.tex'), 'line one\nline two\nline three\n');
+    sh(mine, 'add', '-A'); sh(mine, 'commit', '-qm', 'init'); sh(mine, 'push', '-q', '-u', 'origin', 'HEAD:master');
+    sh(g, 'clone', '-q', bare, theirs);
+    return { g, mine, theirs };
+  };
+
+  // A co-author edits a line; the author has an uncommitted edit to the same line.
+  // `pull --rebase --autostash` fast-forwards, then the stash pop conflicts, leaving
+  // conflict markers in the manuscript. git exits 0, so this used to report success.
+  const c = mk();
+  fs.writeFileSync(path.join(c.theirs, 'main.tex'), 'line one\nTHEIR line two\nline three\n');
+  sh(c.theirs, 'commit', '-qam', 'co-author'); sh(c.theirs, 'push', '-q');
+  fs.writeFileSync(path.join(c.mine, 'main.tex'), 'line one\nMY line two\nline three\n');
+
+  const pr = await gPull(new Project(c.mine));
+  assert.equal(pr.ok, false, 'a pull that leaves conflict markers must not report success');
+  assert.deepEqual(pr.conflict, ['main.tex'], 'the conflicted file is named');
+  assert.match(pr.hint || '', /<<<<<<</, 'the hint tells the author what is now in the file');
+  const merged = fs.readFileSync(path.join(c.mine, 'main.tex'), 'utf8');
+  assert.match(merged, /MY line two/, "the author's own text is still recoverable");
+  assert.match(merged, /THEIR line two/);
+
+  // status() must surface the unresolved state: behind/ahead are both 0 here, so
+  // without this the UI cannot tell a conflicted tree from a healthy one.
+  const st = await gStatus(new Project(c.mine));
+  assert.deepEqual(st.conflicted, ['main.tex'], 'status reports unresolved paths');
+
+  // Sync must refuse while the tree is conflicted. Otherwise `git add -A` commits the
+  // conflict markers and pushes them into the shared manuscript.
+  const before = sh(c.mine, 'rev-parse', 'origin/master').trim();
+  const sr = await gSync(new Project(c.mine), { message: 'oops' });
+  assert.equal(sr.ok, false, 'Sync must refuse a conflicted tree');
+  assert.match(JSON.stringify(sr), /conflict/i, 'and say why');
+  assert.equal(sh(c.mine, 'rev-parse', 'origin/master').trim(), before, 'nothing was pushed');
+  assert.doesNotMatch(sh(c.mine, 'log', '-1', '--format=%H'), new RegExp('^$'));
+  const pushed = sh(c.mine, 'show', 'origin/master:main.tex');
+  assert.doesNotMatch(pushed, /<<<<<<</, 'no conflict markers reached the remote');
+  fs.rmSync(c.g, { recursive: true, force: true });
+
+  // Sync must not carry OS junk to co-authors either.
+  const j = mk();
+  ensureLocalOnlyExcluded(j.mine);
+  fs.writeFileSync(path.join(j.mine, '.DS_Store'), 'macos junk');
+  fs.writeFileSync(path.join(j.mine, 'main.tex'), 'line one edited\nline two\nline three\n');
+  const jr = await gSync(new Project(j.mine), { message: 'edits' });
+  assert.equal(jr.ok, true, JSON.stringify(jr));
+  const onRemote = sh(j.mine, 'ls-tree', '-r', '--name-only', 'origin/master').trim().split('\n');
+  assert.ok(onRemote.includes('main.tex'));
+  assert.ok(!onRemote.includes('.DS_Store'), `.DS_Store was pushed to Overleaf: ${onRemote.join(', ')}`);
+  fs.rmSync(j.g, { recursive: true, force: true });
+  // A branch with no upstream is a dead end on Overleaf: explain it rather than
+  // passing git's "There is no tracking information" through to a toast.
+  const u = mk();
+  sh(u.mine, 'checkout', '-qb', 'my-edits');
+  fs.writeFileSync(path.join(u.mine, 'main.tex'), 'line one changed\nline two\nline three\n');
+  const ur = await gSync(new Project(u.mine), { message: 'on a side branch' });
+  assert.equal(ur.ok, false);
+  assert.match(ur.hint || '', /my-edits/, 'the hint names the branch');
+  assert.match(ur.hint || '', /master/, 'and points back to the branch Overleaf supports');
+  assert.match(sh(u.mine, 'log', '-1', '--format=%s'), /on a side branch/, 'the commit is kept locally');
+  fs.rmSync(u.g, { recursive: true, force: true });
+
+  console.log('conflicted pull reported, Sync refuses it, junk stays local, no-upstream explained');
+}
+
 console.log('\nAll checks passed.');
 await client.close();
 if (running) { await running.close(); fs.rmSync(tmp, { recursive: true, force: true }); }

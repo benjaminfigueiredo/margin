@@ -384,6 +384,7 @@ async function refreshGit() {
     // If the fetch keeps failing, "to pull" is stale: say so instead of looking up to date.
     const unreachable = g.remoteCheck && g.remoteCheck.failures > 1;
     if (unreachable) bits.push("can't reach Overleaf");
+    if (g.conflicted?.length) bits.push(`unresolved conflict in ${g.conflicted.join(', ')}`);
     el.textContent = bits.join(' · ');
     el.title = unreachable ? `Last fetch failed, so "to pull" may be out of date: ${g.remoteCheck.error}` : (g.remote || '');
   } catch { /* ignore */ }
@@ -395,9 +396,12 @@ async function pullFromOverleaf() {
   try {
     if (state.dirty) await save();
     const r = await api('/git/pull', { method: 'POST' });
-    if (!r.ok) { toast(`Pull failed: ${r.out || 'unknown error'}`, 'error', 12000); return; }
-    hideBanner();
-    toast('Pulled from Overleaf', 'ok');
+    // A conflicted pull leaves both versions in the file with <<<<<<< markers. Keep a
+    // banner up explaining that, and still refresh everything below, so the editor shows
+    // what is actually on disk instead of text the file no longer contains.
+    if (r.ok) { hideBanner(); toast('Pulled from Overleaf', 'ok'); }
+    else if (r.conflict?.length) showBanner(r.hint, [[`Open ${r.conflict[0]}`, () => openFile(r.conflict[0])]]);
+    else { toast(`Pull failed: ${r.out || 'unknown error'}`, 'error', 12000); return; }
     await loadTree();
     await Promise.all([refreshGit(), refreshReview()]);
     if (state.file && !state.dirty && state.tree.some((e) => e.path === state.file)) await reloadCurrentFromDisk();
@@ -415,9 +419,22 @@ function onGitChanged(msg) {
 }
 
 $('#btn-sync').addEventListener('click', async () => {
-  const msg = prompt('Commit message for your changes (they will be pushed to Overleaf):', 'Edits via Margin');
-  if (msg === null) return;
   if (state.dirty) await save();
+  // Sync stages everything in the paper folder, so list what is about to reach the
+  // co-authors before asking for a message, rather than just saying "your changes".
+  let intro = 'Commit message for your changes (they will be pushed to Overleaf):';
+  try {
+    const g = await api('/git/status');
+    if (g.conflicted?.length) { toast(`Resolve the conflict in ${g.conflicted.join(', ')} before syncing.`, 'error', 12000); return; }
+    const files = (g.changed || []).map((c) => c.path);
+    if (files.length) {
+      intro = `These ${files.length} file${files.length > 1 ? 's' : ''} will be committed and pushed to Overleaf:\n\n${files.slice(0, 15).join('\n')}${files.length > 15 ? `\n…and ${files.length - 15} more` : ''}\n\nCommit message:`;
+    } else {
+      intro = 'Nothing has changed locally; Sync will just pull from Overleaf.\n\nCommit message:';
+    }
+  } catch { /* fall back to the plain prompt */ }
+  const msg = prompt(intro, 'Edits via Margin');
+  if (msg === null) return;
   const btn = $('#btn-sync');
   btn.classList.add('busy');
   try {
