@@ -8,8 +8,13 @@ a scientist who uses it on real papers: stability matters more than features.
 ## Layout
 
 ```
-bin/margin.js       CLI: `margin [dir]` starts the server, `margin init [dir]` sets up a paper
+bin/margin.js       CLI: `margin [dir]` starts the server, `margin init [dir]` sets up a paper, `margin hub` starts the hub
 server/app.js       Express + WebSocket server, REST API for the UI, /mcp endpoint, file watcher
+server/hub.js       The hub: paper list (projects.json), one `bin/margin.js <dir> --port P` child per paper, .mcp.json kept on the paper's port
+server/localhost.js Host check, cross-site refusal and loopback listeners, shared by app.js and hub.js
+server/config.js    Margin's settings folder (outside every paper), atomic JSON writes, shared appearance settings API
+server/appearance.js Allowed appearance values (theme, font size, layout); pure, also bundled into the browser
+server/macos.js     osascript commands: folder picker, Terminal running claude (folder passed as argv, never in the script)
 server/mcp.js       MCP tool definitions (what Claude can do in a paper session)
 server/review.js    Suggestion/comment store (.review/review.json) and quote-based anchoring
 server/responses.js Referee reports and the point-by-point response (.review/responses.json), owned by ReviewStore
@@ -26,10 +31,11 @@ server/latexdiff.js latexdiff --flatten between a git ref and the paper, compile
 server/project.js   Path safety (all client paths go through Project.abs), file tree, create/rename/delete/upload
 server/init.js      `margin init`: .mcp.json, .claude/ files, .git/info/exclude
 templates/          CLAUDE.md, slash commands and the prompt hook that `margin init` copies into a paper
-web/                UI source: CodeMirror 6 editor, pdf.js viewer, review panel
+web/                UI source: CodeMirror 6 editor, pdf.js viewer, review panel; hub.html/hub.css/src/hub.js for the hub page
 public/             Built UI (committed so users can run without dev dependencies)
 examples/           Sample paper used by the test
 test/run.mjs        End-to-end API test
+test/hub.mjs        End-to-end hub test (child processes, ports, .mcp.json, guards); `npm run test:api` runs both
 test/ui/            Playwright browser tests (npm test runs both)
 ```
 
@@ -56,7 +62,11 @@ The test needs latexmk, bibtex and synctex on PATH.
   Keep both lists in sync when adding new local files.
 - **The server listens on 127.0.0.1 and ::1 only**, checks the Host header, and
   refuses requests a browser marks as cross-site (Origin / Sec-Fetch-Site), on
-  HTTP and the WebSocket alike. Don't loosen any of this.
+  HTTP and the WebSocket alike. The hub does the same, with the same code
+  (`server/localhost.js`), and is stricter on GET. Don't loosen any of this.
+- **The hub's CLI and readiness line are an interface** (a native shell starts
+  `margin hub` and waits for `MARGIN_HUB_READY <url>` on stdout). Keep them as
+  documented in README.md ("For programs that start the hub").
 - **The review store has one writer**: the server process. MCP tools and the UI
   both go through `ReviewStore`; don't write `.review/review.json` directly.
 - **MCP tool changes are user-facing.** Tool names and descriptions are what
@@ -74,5 +84,9 @@ The test needs latexmk, bibtex and synctex on PATH.
 - On macOS `localhost` may resolve to `::1`; the server listens on both, and
   `.mcp.json` uses `127.0.0.1`.
 - `bin/margin.js` must stay executable (git tracks the mode).
+- `res.sendFile` with an absolute path refuses any dot-folder in it (Margin itself may live in
+  one, e.g. a `.claude/worktrees/` checkout): pass `{ root }` and a relative name.
+- Node's global HTTP agent keeps connections alive: a test that restarts a server on the same
+  port must not reuse the old socket (`agent: false`).
 - Overleaf supports a single branch (`master`) and loses its own comments/track
   changes when pushed to via git; Margin's review layer is deliberately separate.
