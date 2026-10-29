@@ -1,3 +1,7 @@
+// NOTE: this module is bundled into the browser UI as well — web/src/wordcount.js
+// imports countLatex from here so the editor's live selection count uses exactly the
+// same counter as GET /api/wordcount. Keep it dependency-free: no `node:` imports, no
+// fs, no path. Anything Node-only belongs in server/app.js or its own module.
 // Built-in word counter for LaTeX sources (no texcount; deterministic and testable).
 // This file has no imports, so the browser bundle can reuse countLatex() for the editor selection.
 //
