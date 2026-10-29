@@ -14,6 +14,10 @@ import { fileURLToPath } from 'node:url';
 import { startServer } from '../server/app.js';
 import { Project } from '../server/project.js';
 
+// Commits made by the server under test (Sync, pull --autostash) need a git identity. CI machines
+// have none configured, so give the test run its own instead of relying on the developer's.
+for (const [k, v] of Object.entries({ GIT_AUTHOR_NAME: 'Margin test', GIT_AUTHOR_EMAIL: 'test@example.org', GIT_COMMITTER_NAME: 'Margin test', GIT_COMMITTER_EMAIL: 'test@example.org' })) process.env[k] ??= v;
+
 let base = process.argv[2];
 let running = null;
 let tmp = null;

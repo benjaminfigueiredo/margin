@@ -1,5 +1,9 @@
 import { defineConfig, devices } from '@playwright/test';
 
+// Commits made by the server under test (Sync, pull --autostash) need a git identity. CI machines
+// have none configured, so give the test run its own instead of relying on the developer's.
+for (const [k, v] of Object.entries({ GIT_AUTHOR_NAME: 'Margin test', GIT_AUTHOR_EMAIL: 'test@example.org', GIT_COMMITTER_NAME: 'Margin test', GIT_COMMITTER_EMAIL: 'test@example.org' })) process.env[k] ??= v;
+
 export default defineConfig({
   testDir: 'test/ui',
   testMatch: '*.spec.mjs',
