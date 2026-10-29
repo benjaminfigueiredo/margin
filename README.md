@@ -109,6 +109,10 @@ In the editor:
 | PDF → source | double-click the PDF |
 | Compiler / main file / auto-recompile | ▾ next to Recompile |
 | Light / dark theme, editor font size | **Aa** in the top bar (saved per browser) |
+| New file / folder | **+** in the Files pane |
+| Rename, delete, reveal in Finder/Explorer | right-click a file or folder (or its **⋯**) |
+| Add a figure | drag an image or PDF onto the editor: it goes to `figures/` and a `figure` block is inserted |
+| Add any file | drag it onto the Files pane (onto a folder to put it there) |
 
 Use **Sync with Overleaf** when you want your accepted changes on Overleaf, and
 before starting a session to pull co-authors' edits.

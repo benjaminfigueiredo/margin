@@ -6,6 +6,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import chokidar from 'chokidar';
@@ -21,6 +22,7 @@ import { countProject } from './wordcount.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(here, '..', 'public');
+const UPLOAD_LIMIT = '20mb'; // same as the JSON limit for saving a file
 
 export async function startServer({ root, port = 4242, main, engine }) {
   const project = new Project(root, { main });
@@ -86,10 +88,12 @@ export async function startServer({ root, port = 4242, main, engine }) {
 
   // ---------- REST API for the UI ----------
   const api = express.Router();
-  api.use(express.json({ limit: '20mb' }));
+  // Uploads are raw bytes whatever their type (a .json upload must not be parsed as the request body).
+  const jsonBody = express.json({ limit: '20mb' });
+  api.use((req, res, next) => (req.path === '/upload' ? next() : jsonBody(req, res, next)));
   const handle = (fn) => async (req, res) => {
     try { const out = await fn(req, res); if (out !== undefined && !res.headersSent) res.json(out); }
-    catch (e) { res.status(400).json({ error: e.message || String(e) }); }
+    catch (e) { res.status(e.status || 400).json({ error: e.message || String(e) }); }
   };
 
   api.get('/project', handle(async () => ({ name: project.name, root: project.root, main: project.main, settings, git: await git.status(project), lastCompile: state.lastCompile ? summarize(state.lastCompile) : null })));
@@ -109,10 +113,50 @@ export async function startServer({ root, port = 4242, main, engine }) {
   api.put('/file', handle(async (req) => {
     const p = String(req.query.path || '');
     if (typeof req.body.content !== 'string') throw new Error('content is required');
-    project.write(p, req.body.content);
+    // exclusive=1: create only, never replace (the UI's "new file" uses it so it cannot clobber a file Claude just made).
+    project.write(p, req.body.content, { exclusive: req.query.exclusive === '1' });
     noteSelfWrite(project.rel(project.abs(p)), req.body.content);
     if (settings.autoCompile) scheduleAutoCompile();
     return { ok: true, mtime: fs.statSync(project.abs(p)).mtimeMs };
+  }));
+  // ---- file management: folders, rename, delete, upload, reveal. All of it goes through Project's guard. ----
+  api.post('/folder', handle(async (req) => ({ ok: true, ...project.mkdir(String(req.body?.path || '')) })));
+  api.post('/file/rename', handle(async (req) => {
+    const { from, to, overwrite } = req.body || {};
+    const r = project.rename(String(from || ''), String(to || ''), { overwrite: overwrite === true });
+    // Comments and suggestions follow the file; the store is the only writer of review.json.
+    const reviewItems = review.moveFile(r.from, r.to);
+    if (state.editor?.file && (state.editor.file === r.from || state.editor.file.startsWith(r.from + '/'))) state.editor = { ...state.editor, file: r.to + state.editor.file.slice(r.from.length) };
+    return { ok: true, ...r, reviewItems };
+  }));
+  // Review items on a deleted file are kept, not deleted: they show as "file missing" and anchor again
+  // if a file of that name comes back (a pull from Overleaf, a restore). review.json is not under
+  // version control, so dropping them would be unrecoverable.
+  api.delete('/file', handle(async (req) => {
+    const r = project.remove(String(req.query.path || ''));
+    const reviewItemsKept = review.itemsUnder(r.path).length;
+    if (reviewItemsKept) broadcast({ type: 'review-changed' }); // their cards now read "file missing"
+    return { ok: true, ...r, reviewItemsKept };
+  }));
+  api.post('/upload', express.raw({ type: () => true, limit: UPLOAD_LIMIT }), handle(async (req) => {
+    const buf = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+    return { ok: true, ...project.writeBinary(String(req.query.path || ''), buf, { overwrite: req.query.overwrite === '1' }) };
+  }));
+  // "Reveal in Finder/Explorer": opens the OS file manager on a path inside the paper folder.
+  api.post('/reveal', handle(async (req) => {
+    const rel = String(req.body?.path || '');
+    const abs = project.abs(rel);
+    if (!fs.existsSync(abs)) throw new Error(`Not found: ${rel}`);
+    const isDir = fs.statSync(abs).isDirectory();
+    const [cmd, args] = process.platform === 'darwin' ? ['open', isDir ? [abs] : ['-R', abs]]
+      : process.platform === 'win32' ? ['explorer.exe', isDir ? [abs] : [`/select,${abs}`]]
+      : ['xdg-open', [isDir ? abs : path.dirname(abs)]];
+    await new Promise((resolve, reject) => {
+      const child = spawn(cmd, args, { detached: true, stdio: 'ignore' });
+      child.once('error', (e) => reject(new Error(e.code === 'ENOENT' ? `No file manager found to open (${cmd} is not installed). The folder is ${project.root}` : e.message)));
+      child.once('spawn', () => { child.unref(); resolve(); });
+    });
+    return { ok: true };
   }));
   api.get('/raw', (req, res) => {
     try { res.sendFile(project.abs(String(req.query.path || '')), { dotfiles: 'allow' }); } catch (e) { res.status(400).send(e.message); }
@@ -144,6 +188,12 @@ export async function startServer({ root, port = 4242, main, engine }) {
   api.get('/wordcount', handle(async () => countProject(project.main, (rel) => project.read(rel))));
   api.get('/citations', handle(async () => checkCitations(project)));
 
+  // Errors from the body parsers (an oversized upload, malformed JSON) as JSON, like every other error here.
+  api.use((err, req, res, next) => {
+    if (res.headersSent) return next(err);
+    const tooBig = err.type === 'entity.too.large';
+    res.status(tooBig ? 413 : err.status || 500).json({ error: tooBig ? `That is over the ${UPLOAD_LIMIT.toUpperCase()} limit.` : err.message });
+  });
   app.use('/api', api);
   app.get('/pdf', (req, res) => {
     if (!fs.existsSync(project.pdfPath)) return res.status(404).send('No PDF yet');

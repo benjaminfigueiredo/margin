@@ -5,6 +5,7 @@ import { createReviewPanel } from './review.js';
 import { initWordCount } from './wordcount.js';
 import { createOutline } from './outline.js';
 import { initSettings } from './settings.js';
+import { createFiles } from './files.js';
 
 const state = {
   project: null,
@@ -77,6 +78,12 @@ const reportEditorState = debounce((s) => {
 async function loadTree() {
   state.tree = await api('/tree');
   renderTree();
+  syncMainOptions();
+}
+
+// The "Main document" choices follow the tree, so a file created or renamed here can be picked.
+function syncMainOptions() {
+  $('#set-main').replaceChildren(...state.tree.filter((e) => e.type === 'file' && e.path.endsWith('.tex')).map((e) => h('option', { value: e.path, selected: e.path === state.project?.main }, e.path)));
 }
 
 function renderTree() {
@@ -93,7 +100,7 @@ function renderTree() {
     const name = parts[parts.length - 1];
     if (entry.type === 'dir') {
       const closed = state.collapsed.has(entry.path);
-      items.push(h('div', { class: 'tree-item dir', style: `padding-left:${10 + depth * 14}px`, onclick: () => { closed ? state.collapsed.delete(entry.path) : state.collapsed.add(entry.path); renderTree(); } },
+      items.push(h('div', { class: 'tree-item dir', dataset: { path: entry.path, kind: 'dir' }, style: `padding-left:${10 + depth * 14}px`, onclick: () => { closed ? state.collapsed.delete(entry.path) : state.collapsed.add(entry.path); renderTree(); } },
         h('span', { class: 'twisty' }, closed ? '▸' : '▾'), h('span', { class: 'name' }, name)));
     } else {
       const count = review ? review.items.filter((it) => it.file === entry.path && it.status === 'open').length : 0;
@@ -101,13 +108,37 @@ function renderTree() {
         class: `tree-item file ${entry.path === state.file ? 'active' : ''} ${entry.text ? '' : 'binary'} ${entry.path === state.project?.main ? 'main' : ''}`,
         style: `padding-left:${10 + depth * 14 + 12}px`,
         title: entry.path,
-        dataset: { parent },
+        dataset: { parent, path: entry.path, kind: 'file' },
         onclick: () => openFile(entry.path),
       }, h('span', { class: `ficon ${ext(name)}` }), h('span', { class: 'name' }, name), count ? h('span', { class: 'count' }, count) : null));
     }
   }
-  root.replaceChildren(...items);
+  root.replaceChildren(...files.decorateAll(items));
 }
+
+// ---------- file management (new / rename / delete / drag-and-drop; see files.js) ----------
+const files = createFiles({
+  tree: $('#tree'), newButton: $('#btn-new'), editorEl: $('#editor'), editor, collapsed: state.collapsed,
+  getTree: () => state.tree, getCurrent: () => state.file, getMain: () => state.project?.main,
+  reviewItemCount: (p) => review.items.filter((it) => it.status === 'open' && (it.file === p || it.file.startsWith(`${p}/`))).length,
+  flush: () => (state.dirty ? save() : Promise.resolve()),
+  render: () => renderTree(),
+  onCreated: (p) => openFile(p),
+  onRenamed: (from, to) => {
+    // Renaming the open file (or its folder) keeps it open under the new name; the editor is not reloaded.
+    if (state.file === from || state.file?.startsWith(`${from}/`)) {
+      state.file = to + state.file.slice(from.length);
+      localStorage.setItem(`margin:${state.project.root}:file`, state.file);
+      $('#current-file').textContent = state.file;
+    }
+    renderTree();
+  },
+  onDeleted: (p) => {
+    // Deleting the open file (or its folder): nothing of it may be saved again; fall back to the main document.
+    if (state.file === p || state.file?.startsWith(`${p}/`)) { state.dirty = false; state.file = null; openFile(state.project.main).catch((e) => toast(e.message, 'error')); }
+    renderTree();
+  },
+});
 
 function ext(name) { const m = name.match(/\.([a-z0-9]+)$/i); return m ? m[1].toLowerCase() : ''; }
 
@@ -519,8 +550,6 @@ async function boot() {
   $('#set-auto').checked = !!state.project.settings.autoCompile;
   if (localStorage.getItem('margin:review-hidden')) { $('#review').classList.add('collapsed'); $('#btn-review').classList.remove('active'); }
   await loadTree();
-  const mainSel = $('#set-main');
-  mainSel.replaceChildren(...state.tree.filter((e) => e.type === 'file' && e.path.endsWith('.tex')).map((e) => h('option', { value: e.path, selected: e.path === state.project.main }, e.path)));
   await refreshReview();
   const remembered = localStorage.getItem(`margin:${state.project.root}:file`);
   const start = state.tree.some((e) => e.path === remembered) ? remembered : state.project.main;
