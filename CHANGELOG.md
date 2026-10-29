@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Fix: when the background fetch keeps failing (an expired Overleaf token, offline, revoked
+  access) the status bar said "Overleaf · master" with no "to pull", which is
+  indistinguishable from being up to date — the same stale-`behind` lie the fetch was added
+  to fix. It now says "can't reach Overleaf", with the git error in the tooltip.
 - New: Margin tells you when Overleaf has commits you have not pulled. The server fetches every
   3 minutes (only for a git project with a remote) and the UI shows a banner with a "Pull from
   Overleaf" button; if a co-author changed the file you have open, the banner names it. Offline, or a

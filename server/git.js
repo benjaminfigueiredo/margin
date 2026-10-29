@@ -86,7 +86,7 @@ export async function pull(project) {
 // Update remote-tracking refs so status().behind reflects what co-authors pushed. Without this
 // `behind` only reflects the last manual fetch. Never throws and never prompts: offline, or a
 // remote that needs a password (GIT_TERMINAL_PROMPT=0), just returns { ok: false }.
-export async function fetch(project, { timeout = 20000 } = {}) {
+export async function fetchRemote(project, { timeout = 20000 } = {}) {
   const r = await git(project, ['fetch', '--quiet'], { timeout });
   return { ok: r.ok, out: (r.stdout + r.stderr).trim() };
 }

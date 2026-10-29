@@ -138,7 +138,7 @@ export async function startServer({ root, port = 4242, main, engine }) {
 
   api.post('/editor-state', handle(async (req) => { state.editor = { ...req.body, at: Date.now() }; return { ok: true }; }));
 
-  api.get('/git/status', handle(async () => git.status(project)));
+  api.get('/git/status', handle(async () => ({ ...await git.status(project), remoteCheck: gitTimer ? { ...gitFetch } : null })));
   api.post('/git/sync', handle(async (req) => { const r = await git.sync(project, { message: req.body.message || undefined }); broadcast({ type: 'tree-changed' }); return r; }));
   api.post('/git/pull', handle(async () => { const r = await git.pull(project); broadcast({ type: 'tree-changed' }); return r; }));
   api.get('/wordcount', handle(async () => countProject(project.main, (rel) => project.read(rel))));
@@ -208,15 +208,23 @@ export async function startServer({ root, port = 4242, main, engine }) {
   // wants a password) are silent: the next tick simply tries again. Only started for a repo with a remote.
   const GIT_POLL_MS = 180000;
   let gitTimer = null, gitLast = null, gitPolling = false;
-  const gitKey = (st) => `${st.behind}/${st.ahead}/${(st.incoming || []).join('\n')}`;
+  // A fetch that keeps failing (expired Overleaf token, offline, revoked access) must not
+  // read as "up to date": status().behind would quietly go back to being stale, which is the
+  // exact problem this poll exists to fix. Two consecutive failures is about six minutes, so
+  // a sleeping laptop or a wifi blip stays quiet.
+  const gitFetch = { checked: false, failures: 0, error: '' };
+  const gitKey = (st) => `${st.behind}/${st.ahead}/${(st.incoming || []).join('\n')}/${gitFetch.failures > 1}`;
   const gitPoll = async () => {
     if (gitPolling) return;
     gitPolling = true;
     try {
-      await git.fetch(project);
+      const r = await git.fetchRemote(project);
+      gitFetch.checked = true;
+      if (r.ok) { gitFetch.failures = 0; gitFetch.error = ''; }
+      else { gitFetch.failures++; gitFetch.error = r.out; }
       const st = await git.status(project);
       if (!st.repo || st.behind == null) return;
-      if (gitKey(st) !== gitLast) { gitLast = gitKey(st); broadcast({ type: 'git-changed', behind: st.behind, ahead: st.ahead, files: st.incoming || [] }); }
+      if (gitKey(st) !== gitLast) { gitLast = gitKey(st); broadcast({ type: 'git-changed', behind: st.behind, ahead: st.ahead, files: st.incoming || [], reachable: gitFetch.failures <= 1 }); }
     } catch { /* silent */ } finally { gitPolling = false; }
   };
   if (await git.hasRemote(project)) {

@@ -381,8 +381,11 @@ async function refreshGit() {
     if (g.changed.length) bits.push(`${g.changed.length} changed`);
     if (g.ahead) bits.push(`${g.ahead} to push`);
     if (g.behind) bits.push(`${g.behind} to pull`);
+    // If the fetch keeps failing, "to pull" is stale: say so instead of looking up to date.
+    const unreachable = g.remoteCheck && g.remoteCheck.failures > 1;
+    if (unreachable) bits.push("can't reach Overleaf");
     el.textContent = bits.join(' · ');
-    el.title = g.remote || '';
+    el.title = unreachable ? `Last fetch failed, so "to pull" may be out of date: ${g.remoteCheck.error}` : (g.remote || '');
   } catch { /* ignore */ }
 }
 

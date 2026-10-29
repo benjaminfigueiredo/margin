@@ -501,7 +501,7 @@ if (running) {
 
 step('git: fetch makes status().behind real; timer only with a remote, cleared by close()');
 {
-  const { fetch: gitFetch } = await import('../server/git.js');
+  const { fetchRemote } = await import('../server/git.js');
   const sh = (cwd, ...a) => execFileSync('git', ['-c', 'user.name=test', '-c', 'user.email=test@example.org', ...a], { cwd, stdio: 'pipe' }).toString();
   const g = fs.mkdtempSync(path.join(os.tmpdir(), 'margin-gitpoll-'));
   const bare = path.join(g, 'remote.git');
@@ -521,15 +521,25 @@ step('git: fetch makes status().behind real; timer only with a remote, cleared b
   fs.writeFileSync(path.join(theirs, 'other.tex'), 'other, edited by a co-author\n');
   sh(theirs, 'commit', '-qam', 'co-author edit'); sh(theirs, 'push', '-q');
   assert.equal((await gstatus()).behind, 0, 'stale before any fetch (this is the old bug)');
-  const f = await gitFetch(new Project(mine));
+  const f = await fetchRemote(new Project(mine));
   assert.equal(f.ok, true);
   const st = await gstatus();
   assert.equal(st.behind, 1, 'behind reflects the remote after fetch');
   assert.deepEqual(st.incoming, ['other.tex']);
   // A fetch that cannot reach the remote is silent: no throw, ok false.
   sh(mine, 'remote', 'set-url', 'origin', path.join(g, 'does-not-exist.git'));
-  const bad = await gitFetch(new Project(mine));
+  const bad = await fetchRemote(new Project(mine));
   assert.equal(bad.ok, false);
+  // A fetch that keeps failing must not read as "up to date": the status surfaces it,
+  // otherwise `behind` silently goes stale again and the status bar lies as it did before.
+  const fresh = await gstatus();
+  assert.ok(fresh.remoteCheck, 'git status must report whether the fetch is actually working');
+  assert.equal(fresh.remoteCheck.failures, 0, 'no failures recorded yet');
+  await srv.gitPoll(); await srv.gitPoll();
+  const sick = await gstatus();
+  assert.equal(sick.remoteCheck.failures, 2, 'consecutive fetch failures are counted');
+  assert.ok(sick.remoteCheck.error, 'the git error is kept for the tooltip');
+  assert.equal(sick.remoteCheck.checked, true);
   await srv.close();
   assert.equal(srv.gitTimerActive(), false, 'close() clears the poll timer');
 
