@@ -9,6 +9,7 @@ import { EventEmitter } from 'node:events';
 import { ResponseStore } from './responses.js';
 
 const CONTEXT = 48;
+const MIN_ID_PREFIX = 4;
 
 // Schema versioning. review.json is a paper's whole review history and is not in
 // git, so it must never be silently dropped or overwritten.
@@ -118,10 +119,17 @@ export class ReviewStore extends EventEmitter {
     this.emit('change');
   }
 
+  // An item by its full id or by a prefix of at least MIN_ID_PREFIX characters (tools show
+  // the first 8). A prefix that fits several items is refused, never guessed.
   get(id) {
-    const item = this.data.items.find((it) => it.id === id || it.id.startsWith(id));
-    if (!item) throw new Error(`No review item with id ${id}`);
-    return item;
+    id = String(id ?? '').trim();
+    const exact = this.data.items.find((it) => it.id === id);
+    if (exact) return exact;
+    if (id.length < MIN_ID_PREFIX) throw new Error(`Review item id "${id}" is too short: give at least ${MIN_ID_PREFIX} characters (the 8 shown in listings)`);
+    const hits = this.data.items.filter((it) => it.id.startsWith(id));
+    if (hits.length > 1) throw new Error(`Review item id "${id}" is ambiguous; it matches ${hits.map((it) => it.id.slice(0, 8)).join(', ')}. Use more characters.`);
+    if (!hits.length) throw new Error(`No review item with id ${id}`);
+    return hits[0];
   }
 
   // ---------- files ----------

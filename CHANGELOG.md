@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Fix: a review item id typed as a short prefix that fits several items (accept, reject, resolve,
+  reply) used to act on the first one. It is now refused with the candidates listed, and prefixes
+  under 4 characters are refused.
 - Fix: in a browser that blocks site storage (some private modes, strict cookie settings) a paper
   page did not open at all. Margin keeps only conveniences there (last open file, pane widths),
   so it now carries on without them.

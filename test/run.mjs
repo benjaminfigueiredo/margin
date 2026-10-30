@@ -116,6 +116,28 @@ step('add_comment');
 r = await call('add_comment', { file: 'sections/intro.tex', quote: '\\citep{missingref2020}', comment: 'This key is not in refs.bib. Which paper did you mean — one of the single-heatwave studies on Acartia?' });
 console.log(r.text); assert.ok(!r.error);
 
+step('review ids: a prefix must be unique and long enough');
+{
+  const { ReviewStore } = await import('../server/review.js');
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'margin-ids-'));
+  fs.mkdirSync(path.join(d, '.review'), { recursive: true });
+  const it = (id) => ({ id, kind: 'comment', file: 'main.tex', quote: 'q', body: 'b', author: 'x', status: 'open', replies: [] });
+  fs.writeFileSync(path.join(d, '.review', 'review.json'), JSON.stringify({ version: 1, items: [it('abcd1111-0000'), it('abcd2222-0000'), it('beef3333-0000')] }));
+  const s = new ReviewStore({ reviewDir: path.join(d, '.review'), read: () => '' });
+  assert.throws(() => s.get('abcd'), (e) => /ambiguous/.test(e.message) && e.message.includes('abcd1111') && e.message.includes('abcd2222') && !e.message.includes('beef'));
+  assert.equal(s.get('abcd1').id, 'abcd1111-0000');
+  assert.equal(s.get('beef').id, 'beef3333-0000');
+  assert.equal(s.get('abcd1111-0000').id, 'abcd1111-0000');
+  assert.throws(() => s.get('a'), /too short/);
+  assert.throws(() => s.get(''), /too short/);
+  assert.throws(() => s.get('zzzzzz'), /No review item/);
+  assert.throws(() => s.reply('abcd', { body: 'x', author: 'claude' }), /ambiguous/);
+  assert.equal(s.data.items.every((i) => !i.replies.length), true, 'an ambiguous id changes nothing');
+  fs.rmSync(d, { recursive: true, force: true });
+  r = await call('resolve', { id: 'a' });
+  assert.ok(r.error && /too short/.test(r.text));
+}
+
 step('author leaves a comment for Claude (REST, as the UI does)');
 await rest('/review/comment', { method: 'POST', body: { file: 'sections/methods.tex', quote: 'held for 72 hours', comment: 'Claude: should we justify why 72 h?' } });
 r = await call('list_review', { author: 'you' });
