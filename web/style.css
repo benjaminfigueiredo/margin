@@ -187,6 +187,7 @@ button, select, textarea, input { font: inherit; color: inherit; }
 .popover label { display: grid; gap: 4px; font-weight: 500; }
 .popover select { padding: 4px 6px; border: 1px solid var(--line-strong); border-radius: 5px; background: var(--paper); }
 .check { display: flex !important; align-items: center; gap: 6px; font-weight: 400 !important; cursor: pointer; }
+.check.hidden { display: none !important; } /* .hidden alone loses to the !important above */
 
 /* ---------- layout ---------- */
 .workspace { display: flex; min-height: 0; }
