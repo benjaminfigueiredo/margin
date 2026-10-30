@@ -8,15 +8,15 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
-      - name: Install TeX (latexmk, bibtex, synctex)
+      - name: Install TeX (latexmk, bibtex, synctex, latexdiff)
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends latexmk texlive-latex-recommended texlive-latex-extra texlive-bibtex-extra
+          sudo apt-get install -y --no-install-recommends latexmk texlive-latex-recommended texlive-latex-extra texlive-bibtex-extra latexdiff texlive-plain-generic
       - run: npm ci
       - name: Built UI is up to date
         run: |
@@ -24,4 +24,14 @@ jobs:
           git diff --exit-code -- public/ || (echo "public/ is stale: run 'npm run build' and commit it" && exit 1)
       - name: Install Playwright browser
         run: npx playwright install --with-deps chromium
-      - run: npm test
+      - name: Run npm test
+        run: |
+          set -o pipefail
+          npm test 2>&1 | tee test-output.txt
+      # Put the end of the output on the commit as an annotation, so a failure (the API test's
+      # assertion in particular) can be read without downloading the log.
+      - name: Summarise a failure
+        if: failure()
+        run: |
+          tail -n 80 test-output.txt | sed 's/%/%25/g' | awk 'BEGIN{ORS="%0A"} {print}' > tail.txt
+          echo "::error title=npm test failed (last 80 lines)::$(cat tail.txt)"

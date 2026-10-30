@@ -1,7 +1,7 @@
 // Review rail: cards for suggestions and comments, with accept/reject/edit/reply.
 import { api, h, toast, timeAgo, wordDiff } from './util.js';
 
-export function createReviewPanel(root, { getCurrentFile, onFocus, onChanged, saveIfDirty }) {
+export function createReviewPanel(root, { getCurrentFile, onFocus, onChanged, saveIfDirty, extra }) {
   let items = [];
   let scope = 'file';
   let showClosed = false;
@@ -14,8 +14,8 @@ export function createReviewPanel(root, { getCurrentFile, onFocus, onChanged, sa
 
   // Flush pending editor edits before any review action. Accept and Undo rewrite the
   // source file, so without this the server applies the change to a version of the file
-  // that is missing the author's unsaved edits, and the "changed on disk" banner's
-  // "Keep mine" writes the stale buffer back over the applied change.
+  // that is missing the author's unsaved edits. (saveIfDirty refuses while the editor has
+  // edits it cannot save; edits typed during the request are merged by web/src/main.js.)
   async function act(fn, okMsg) {
     try { await saveIfDirty?.(); await fn(); if (okMsg) toast(okMsg, 'ok', 1800); await onChanged(); }
     catch (e) { toast(e.message, 'error', 6000); }
@@ -34,14 +34,14 @@ export function createReviewPanel(root, { getCurrentFile, onFocus, onChanged, sa
       onclick: (e) => { if (e.target.closest('button, textarea, input')) return; onFocus(it); },
     });
 
-    const label = it.kind === 'suggestion' ? (it.replacement === '' ? 'Suggested deletion' : 'Suggested edit') : 'Comment';
+    const label = it.kind === 'suggestion' ? (it.replacement === '' ? 'Suggested deletion' : 'Suggested edit') : it.ask ? 'Ask Claude' : 'Comment';
     el.append(h('div', { class: 'card-head' },
       author(it.author),
       h('div', { class: 'meta' },
         h('div', { class: 'who' }, authorName(it.author), h('span', { class: 'kind' }, ` · ${label}`)),
         h('div', { class: 'when' }, `${scope === 'all' ? it.file + ' · ' : ''}${it.line ? 'line ' + it.line + ' · ' : ''}${timeAgo(it.createdAt)}`)),
       !isOpen ? h('span', { class: `status ${it.status}` }, it.status) : null,
-      it.orphaned && isOpen ? h('span', { class: 'status orphan', title: 'The quoted text is no longer in the file' }, 'text changed') : null,
+      it.orphaned && isOpen ? h('span', { class: 'status orphan', title: it.fileMissing ? `${it.file} no longer exists. This item is kept, and attaches again if the file comes back.` : 'The quoted text is no longer in the file' }, it.fileMissing ? 'file missing' : 'text changed') : null,
     ));
 
     if (it.kind === 'suggestion') {
@@ -60,6 +60,8 @@ export function createReviewPanel(root, { getCurrentFile, onFocus, onChanged, sa
       el.append(h('div', { class: 'quote' }, it.quote.length > 220 ? it.quote.slice(0, 220) + '…' : it.quote));
     }
     if (it.body) el.append(h('div', { class: 'body' }, it.body));
+    const more = extra?.(it, items); // "Ask Claude" progress and links (web/src/ask.js)
+    if (more) el.append(more);
 
     for (const r of it.replies || []) {
       el.append(h('div', { class: `reply ${r.author}` }, author(r.author), h('div', {}, h('div', { class: 'who' }, authorName(r.author), h('span', { class: 'when' }, ` · ${timeAgo(r.createdAt)}`)), h('div', { class: 'body' }, r.body))));
@@ -117,7 +119,7 @@ export function createReviewPanel(root, { getCurrentFile, onFocus, onChanged, sa
     if (vis.length === 0) {
       list.replaceChildren(h('div', { class: 'empty' },
         h('p', {}, scope === 'file' ? 'No open threads in this file.' : 'No open threads.'),
-        h('p', { class: 'hint' }, 'Select text and press “Comment” to leave a note for Claude, or ask Claude in your terminal to review a section.')));
+        h('p', { class: 'hint' }, 'Select text and press “Ask Claude” to send Claude a request, “Comment” to leave a note, or ask Claude in your terminal to review a section.')));
       return;
     }
     list.replaceChildren(...vis.map(card));

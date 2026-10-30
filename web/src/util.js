@@ -1,13 +1,23 @@
-export async function api(path, { method = 'GET', body } = {}) {
+// keepalive: the request outlives the page (browsers allow 64 KB of such bodies in flight per page).
+// A failed request throws an Error that carries the HTTP status and the JSON body of the answer.
+export async function api(path, { method = 'GET', body, keepalive } = {}) {
   const res = await fetch(`/api${path}`, {
     method,
     headers: body !== undefined ? { 'Content-Type': 'application/json' } : undefined,
-    body: body !== undefined ? JSON.stringify(body) : undefined,
+    body: body === undefined ? undefined : typeof body === 'string' ? body : JSON.stringify(body),
+    keepalive: keepalive || undefined,
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || `${res.status} ${res.statusText}`);
+  if (!res.ok) throw Object.assign(new Error(data.error || `${res.status} ${res.statusText}`), { status: res.status, data });
   return data;
 }
+
+// localStorage holds only per-browser conveniences (last file, pane widths). A browser that blocks
+// site storage throws on every access; that must never stop a paper from opening.
+export const store = {
+  get(key) { try { return localStorage.getItem(key); } catch { return null; } },
+  set(key, value) { try { localStorage.setItem(key, value); } catch { /* lasts for this page only */ } },
+};
 
 export const $ = (sel, root = document) => root.querySelector(sel);
 export const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];

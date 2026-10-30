@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Margin.app's Info.plist. mac/build-app.sh copies it into the bundle and sets the two version
+     strings from package.json. -->
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleDisplayName</key>
+	<string>Margin</string>
+	<key>CFBundleExecutable</key>
+	<string>Margin</string>
+	<key>CFBundleIconFile</key>
+	<string>Margin</string>
+	<key>CFBundleIdentifier</key>
+	<string>io.github.benjaminfigueiredo.margin</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>Margin</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.0.0</string>
+	<key>CFBundleVersion</key>
+	<string>0.0.0</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>13.0</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.productivity</string>
+	<key>NSHumanReadableCopyright</key>
+	<string>© 2026 Benjamin Garcia de Figueiredo. MIT License.</string>
+	<key>NSPrincipalClass</key>
+	<string>NSApplication</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSSupportsAutomaticGraphicsSwitching</key>
+	<true/>
+	<!-- "Claude terminal" (a paper's status bar, or the Papers page) runs osascript to tell Terminal
+	     to open the paper folder, run claude and place its window (SplitScreen.swift). osascript is
+	     a child of this app, so macOS asks on Margin's behalf; without this string the request
+	     fails silently. -->
+	<key>NSAppleEventsUsageDescription</key>
+	<string>Margin asks Terminal to open a paper&apos;s folder, run Claude Code there and place its window below the paper (the Claude terminal button).</string>
+	<!-- Everything Margin shows comes from its own servers on 127.0.0.1 over plain http. -->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+	<!-- Folders can be opened with Margin (Finder's Open With, or a folder dropped on the Dock
+	     icon), and notes (.md, .markdown, .txt, .text, .pdf) added to a paper's private context the
+	     same ways (NoteDrop.swift). Alternate: Margin never becomes the default app for folders,
+	     text, Markdown or PDF files. -->
+	<key>CFBundleDocumentTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Paper folder</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>public.folder</string>
+			</array>
+		</dict>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Note for a paper's private context</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>net.daringfireball.markdown</string>
+				<string>public.plain-text</string>
+				<string>com.adobe.pdf</string>
+			</array>
+		</dict>
+	</array>
+	<!-- Markdown's type, in case no other app on the Mac declares it (an imported declaration
+	     defers to the system's or another app's own). -->
+	<key>UTImportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>net.daringfireball.markdown</string>
+			<key>UTTypeDescription</key>
+			<string>Markdown document</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.plain-text</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>md</string>
+					<string>markdown</string>
+				</array>
+			</dict>
+		</dict>
+	</array>
+</dict>
+</plist>

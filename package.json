@@ -1,13 +1,13 @@
 {
   "name": "margin-latex",
-  "version": "0.1.1",
+  "version": "0.3.0",
   "description": "Overleaf-style LaTeX editor where Claude reviews your manuscript",
   "main": "server/app.js",
   "scripts": {
     "build": "node build.mjs",
     "start": "node bin/margin.js",
     "test": "npm run test:api && npm run test:ui",
-    "test:api": "node test/run.mjs",
+    "test:api": "node test/run.mjs && node test/hub.mjs",
     "test:ui": "playwright test"
   },
   "license": "MIT",

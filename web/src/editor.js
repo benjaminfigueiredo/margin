@@ -35,7 +35,7 @@ function buildDecorations(items, activeId, docLength) {
       if (it.to > it.from) ranges.push({ from: it.from, to: it.to, deco: Decoration.mark({ class: `cm-sugg-del${active ? ' active' : ''}`, attributes: { 'data-review-id': it.id } }) });
       ranges.push({ from: it.to, to: it.to, deco: Decoration.widget({ widget: new InsertWidget(it.replacement, it.id, active), side: 1 }) });
     } else {
-      ranges.push({ from: it.from, to: Math.max(it.to, it.from + 1), deco: Decoration.mark({ class: `cm-comment${it.author === 'you' ? ' mine' : ''}${active ? ' active' : ''}`, attributes: { 'data-review-id': it.id } }) });
+      ranges.push({ from: it.from, to: Math.max(it.to, it.from + 1), deco: Decoration.mark({ class: `cm-comment${it.author === 'you' ? ' mine' : ''}${it.ask ? ' ask' : ''}${active ? ' active' : ''}`, attributes: { 'data-review-id': it.id } }) });
     }
   }
   ranges.sort((a, b) => a.from - b.from || a.to - b.to);
@@ -111,37 +111,42 @@ const diagnosticGutter = gutter({
   },
 });
 
+// Colours come from CSS custom properties in web/style.css, so the light and dark themes
+// (and anything else that redefines the tokens) restyle the editor without rebuilding it.
 const highlight = HighlightStyle.define([
-  { tag: t.keyword, color: '#7a3e9d' },           // \commands
-  { tag: t.tagName, color: '#7a3e9d' },
-  { tag: t.atom, color: '#1f6f8b' },
-  { tag: t.bracket, color: '#5b6770' },
-  { tag: t.comment, color: '#8a9399', fontStyle: 'italic' },
-  { tag: t.string, color: '#2f7d4f' },
-  { tag: t.number, color: '#b0560f' },
-  { tag: t.variableName, color: '#1f6f8b' },
-  { tag: t.meta, color: '#b0560f' },
-  { tag: t.special(t.string), color: '#c0392b' },  // math
+  { tag: t.keyword, color: 'var(--syn-command)' },  // \commands
+  { tag: t.tagName, color: 'var(--syn-command)' },
+  { tag: t.atom, color: 'var(--syn-atom)' },
+  { tag: t.bracket, color: 'var(--syn-bracket)' },
+  { tag: t.comment, color: 'var(--syn-comment)', fontStyle: 'italic' },
+  { tag: t.string, color: 'var(--syn-string)' },
+  { tag: t.number, color: 'var(--syn-number)' },
+  { tag: t.variableName, color: 'var(--syn-atom)' },
+  { tag: t.meta, color: 'var(--syn-number)' },
+  { tag: t.special(t.string), color: 'var(--syn-math)' },  // math
 ]);
 
 const theme = EditorView.theme({
-  '&': { height: '100%', fontSize: '14px' },
+  '&': { height: '100%', fontSize: 'var(--editor-font-size)', color: 'var(--ink)' },
   '.cm-scroller': { fontFamily: 'var(--mono)', lineHeight: '1.6' },
-  '.cm-content': { padding: '12px 0 40vh' },
+  '.cm-content': { padding: '12px 0 40vh', caretColor: 'var(--ink)' },
+  '.cm-cursor, .cm-dropCursor': { borderLeftColor: 'var(--ink)' },
   '.cm-gutters': { background: 'var(--gutter)', border: 'none', color: 'var(--muted)' },
-  '.cm-activeLine': { background: 'rgba(60, 120, 90, 0.05)' },
-  '.cm-activeLineGutter': { background: 'rgba(60, 120, 90, 0.10)' },
-  '&.cm-focused .cm-selectionBackground, .cm-selectionBackground': { background: 'rgba(61, 139, 95, 0.22) !important' },
+  '.cm-activeLine': { background: 'var(--active-line)' },
+  '.cm-activeLineGutter': { background: 'var(--active-gutter)' },
+  '&.cm-focused .cm-selectionBackground, .cm-selectionBackground': { background: 'var(--selection) !important' },
 });
 
 export function createEditor(parent, { onChange, onSelection, onReviewClick, keys = [] }) {
   const wrapping = new Compartment();
   const readOnly = new Compartment();
+  // Tells CodeMirror's own base theme (search panel, tooltips, bracket matching) which variant to use.
+  const darkMode = new Compartment();
   const extensions = [
     diagnosticField, diagnosticGutter, lineNumbers(), highlightActiveLineGutter(), highlightSpecialChars(), history(), foldGutter(), drawSelection(), dropCursor(),
     EditorState.allowMultipleSelections.of(true), indentOnInput(), bracketMatching(), rectangularSelection(), crosshairCursor(),
     highlightActiveLine(), highlightSelectionMatches(),
-    StreamLanguage.define(stex), syntaxHighlighting(highlight), theme,
+    StreamLanguage.define(stex), syntaxHighlighting(highlight), theme, darkMode.of(EditorView.darkTheme.of(false)),
     wrapping.of(EditorView.lineWrapping), readOnly.of(EditorState.readOnly.of(false)),
     reviewField,
     keymap.of([...keys, ...defaultKeymap, ...historyKeymap, ...searchKeymap, indentWithTab]),
@@ -175,6 +180,10 @@ export function createEditor(parent, { onChange, onSelection, onReviewClick, key
       while (endA > start && endB > start && cur[endA - 1] === text[endB - 1]) { endA--; endB--; }
       view.dispatch({ changes: { from: start, to: endA, insert: text.slice(start, endB) }, annotations: external.of(true) });
     },
+    // Apply a change made elsewhere (merged into the author's unsaved edits); not reported as typing.
+    applyExternal({ from, to, insert }) {
+      view.dispatch({ changes: { from, to, insert }, annotations: external.of(true) });
+    },
     getDoc() { return view.state.doc.toString(); },
     setReview(items, active) {
       view.dispatch({ effects: [setItems.of(items), setActive.of(active ?? view.state.field(reviewField).active)] });
@@ -196,6 +205,9 @@ export function createEditor(parent, { onChange, onSelection, onReviewClick, key
       view.dispatch({ selection: { anchor: from, head: to }, effects: EditorView.scrollIntoView(from, { y: 'center' }) });
     },
     setReadOnly(ro) { view.dispatch({ effects: readOnly.reconfigure(EditorState.readOnly.of(ro)) }); },
+    setDark(dark) { view.dispatch({ effects: darkMode.reconfigure(EditorView.darkTheme.of(dark)) }); },
+    // The colours and font size live in CSS variables; after changing them CodeMirror must re-measure line heights.
+    remeasure() { view.requestMeasure(); },
     focus() { view.focus(); },
   };
 }

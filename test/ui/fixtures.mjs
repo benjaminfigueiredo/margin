@@ -7,6 +7,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { startServer } from '../../server/app.js';
+import { freePort } from '../free-port.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -16,7 +17,7 @@ async function launch() {
   fs.cpSync(path.join(here, '..', '..', 'examples', 'sample-paper'), paper, { recursive: true });
   const git = (...a) => execFileSync('git', a, { cwd: paper, stdio: 'ignore' });
   git('init', '-q'); git('add', '-A'); git('-c', 'user.name=test', '-c', 'user.email=test@example.org', 'commit', '-qm', 'init');
-  const port = 43000 + Math.floor(Math.random() * 2000);
+  const port = await freePort();
   const running = await startServer({ root: paper, port });
   return { tmp, paper, baseURL: `http://127.0.0.1:${port}`, running };
 }

@@ -6,8 +6,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { EventEmitter } from 'node:events';
+import { ResponseStore } from './responses.js';
 
 const CONTEXT = 48;
+const MIN_ID_PREFIX = 4;
 
 // Schema versioning. review.json is a paper's whole review history and is not in
 // git, so it must never be silently dropped or overwritten.
@@ -24,59 +26,62 @@ const MIGRATIONS = {
 };
 const BACKUPS_KEPT = 3;
 
-export class ReviewStore extends EventEmitter {
-  constructor(project) {
-    super();
-    this.project = project;
-    this.file = path.join(project.reviewDir, 'review.json');
-    this.data = { version: CURRENT_VERSION, items: [] };
-    this.load();
+// A JSON file under .review/ with a `version` field, migrations, rotating backups and
+// quarantine of unreadable files. review.json (below) and responses.json (responses.js)
+// both use it, so the two get exactly the same protections. Owned by ReviewStore, which
+// stays the only writer of .review/.
+export class VersionedJsonFile {
+  // what: the name used in messages ("review", "response"); check(raw) returns why the
+  // parsed data is unusable, or null if it is fine.
+  constructor(file, { version, migrations, check, what }) {
+    Object.assign(this, { file, version, migrations, check, what });
   }
 
-  // Throws (with a message naming the file) if the file is from a newer Margin;
-  // startServer propagates that and bin/margin.js prints it and exits 1.
+  // Returns { data, migrated } or null when there is nothing to load (first run, or the
+  // file was unreadable and has been moved aside). Throws (with a message naming the
+  // file) if the file is from a newer Margin; startServer propagates that and
+  // bin/margin.js prints it and exits 1.
   load() {
     let text;
     try { text = fs.readFileSync(this.file, 'utf8'); } catch (e) {
-      if (e.code === 'ENOENT') return; // first run
+      if (e.code === 'ENOENT') return null; // first run
       throw new Error(`Cannot read ${this.file}: ${e.message}`);
     }
     let raw;
     try {
       raw = JSON.parse(text);
-      if (!raw || typeof raw !== 'object' || !Array.isArray(raw.items)) throw new Error('no items array');
+      const problem = !raw || typeof raw !== 'object' ? 'not an object' : this.check(raw);
+      if (problem) throw new Error(problem);
     } catch (e) {
       const aside = `${this.file}.corrupt-${new Date().toISOString().replace(/[:.]/g, '-')}`;
       fs.renameSync(this.file, aside);
-      console.warn(`margin: ${this.file} could not be read (${e.message}). Moved it to ${aside}; starting with an empty review. Recover by hand from that file or from review.json.bak*.`);
-      return;
+      console.warn(`margin: ${this.file} could not be read (${e.message}). Moved it to ${aside}; starting with an empty ${this.what}. Recover by hand from that file or from ${path.basename(this.file)}.bak*.`);
+      return null;
     }
     let v = Number.isInteger(raw.version) ? raw.version : 0;
-    if (v > CURRENT_VERSION) {
-      throw new Error(`${this.file} was written by a newer version of Margin (review format ${v}; this build understands up to ${CURRENT_VERSION}). Update Margin to open this paper. The file has not been modified.`);
+    if (v > this.version) {
+      throw new Error(`${this.file} was written by a newer version of Margin (${this.what} format ${v}; this build understands up to ${this.version}). Update Margin to open this paper. The file has not been modified.`);
     }
-    const migrated = v < CURRENT_VERSION;
-    while (v < CURRENT_VERSION) {
-      const m = MIGRATIONS[v];
-      if (!m) throw new Error(`${this.file}: no migration from review format ${v}. The file has not been modified.`);
+    const migrated = v < this.version;
+    while (v < this.version) {
+      const m = this.migrations[v];
+      if (!m) throw new Error(`${this.file}: no migration from ${this.what} format ${v}. The file has not been modified.`);
       raw = m(raw);
       v = raw.version;
     }
-    this.data = raw;
-    if (migrated) this.save(); // save() keeps the pre-migration file as a backup
+    return { data: raw, migrated }; // the caller saves a migrated file; save() keeps the old one as a backup
   }
 
-  save() {
+  save(data) {
     fs.mkdirSync(path.dirname(this.file), { recursive: true });
     const tmp = this.file + '.tmp';
-    fs.writeFileSync(tmp, JSON.stringify(this.data, null, 2));
+    fs.writeFileSync(tmp, JSON.stringify(data, null, 2));
     this.rotateBackups();
-    fs.renameSync(tmp, this.file); // atomic; review.json is never missing or partial
-    this.emit('change');
+    fs.renameSync(tmp, this.file); // atomic; the file is never missing or partial
   }
 
-  // Keep the last BACKUPS_KEPT versions: review.json.bak (newest), .bak2, .bak3.
-  // Copies, not renames, so review.json stays in place until the atomic rename.
+  // Keep the last BACKUPS_KEPT versions: <file>.bak (newest), .bak2, .bak3.
+  // Copies, not renames, so the file stays in place until the atomic rename.
   rotateBackups() {
     if (!fs.existsSync(this.file)) return;
     for (let i = BACKUPS_KEPT; i >= 2; i--) {
@@ -85,11 +90,80 @@ export class ReviewStore extends EventEmitter {
     }
     fs.copyFileSync(this.file, this.file + '.bak');
   }
+}
+
+// .review/archive.json: closed items that "clear closed" removed from review.json. Same
+// protections as the other two files. Version 1 added the field; older files hold the same items.
+const ARCHIVE_VERSION = 1;
+const ARCHIVE_MIGRATIONS = { 0: (d) => ({ ...d, version: 1 }) };
+
+export class ReviewStore extends EventEmitter {
+  constructor(project) {
+    super();
+    this.project = project;
+    this.file = path.join(project.reviewDir, 'review.json');
+    this.store = new VersionedJsonFile(this.file, {
+      version: CURRENT_VERSION, migrations: MIGRATIONS, what: 'review',
+      check: (raw) => (Array.isArray(raw.items) ? null : 'no items array'),
+    });
+    this.archive = new VersionedJsonFile(path.join(project.reviewDir, 'archive.json'), {
+      version: ARCHIVE_VERSION, migrations: ARCHIVE_MIGRATIONS, what: 'archive',
+      check: (raw) => (Array.isArray(raw.items) ? null : 'no items array'),
+    });
+    this.data = { version: CURRENT_VERSION, items: [] };
+    this.load();
+    // The response to referees (.review/responses.json): a separate file, same writer.
+    this.responses = new ResponseStore(this);
+  }
+
+  load() {
+    const r = this.store.load();
+    if (!r) return;
+    this.data = r.data;
+    if (r.migrated) this.save();
+  }
+
+  save() {
+    this.store.save(this.data);
+    this.emit('change');
+  }
+
+  // An item by its full id or by a prefix of at least MIN_ID_PREFIX characters (tools show
+  // the first 8). A prefix that fits several items is refused, never guessed.
+  // The archived items, for read-only lookups (accepted-since, links from the response). Never
+  // moves or rewrites the file; an unreadable or newer-format archive reads as empty here, and
+  // clearClosed() is what refuses or quarantines it.
+  archivedItems() {
+    try {
+      const raw = JSON.parse(fs.readFileSync(this.archive.file, 'utf8'));
+      return Array.isArray(raw?.items) ? raw.items : [];
+    } catch { return []; }
+  }
 
   get(id) {
-    const item = this.data.items.find((it) => it.id === id || it.id.startsWith(id));
-    if (!item) throw new Error(`No review item with id ${id}`);
-    return item;
+    id = String(id ?? '').trim();
+    const exact = this.data.items.find((it) => it.id === id);
+    if (exact) return exact;
+    if (id.length < MIN_ID_PREFIX) throw new Error(`Review item id "${id}" is too short: give at least ${MIN_ID_PREFIX} characters (the 8 shown in listings)`);
+    const hits = this.data.items.filter((it) => it.id.startsWith(id));
+    if (hits.length > 1) throw new Error(`Review item id "${id}" is ambiguous; it matches ${hits.map((it) => it.id.slice(0, 8)).join(', ')}. Use more characters.`);
+    if (!hits.length) throw new Error(`No review item with id ${id}`);
+    return hits[0];
+  }
+
+  // ---------- files ----------
+
+  // Items on `rel`, or on any file inside it when it is a folder.
+  itemsUnder(rel) {
+    return this.data.items.filter((it) => it.file === rel || it.file.startsWith(rel + '/'));
+  }
+
+  // A file or folder was renamed in Margin: its comments and suggestions follow it.
+  moveFile(from, to) {
+    const moved = this.itemsUnder(from);
+    for (const it of moved) it.file = to + it.file.slice(from.length);
+    if (moved.length) this.save();
+    return moved.length;
   }
 
   // ---------- queries ----------
@@ -102,19 +176,20 @@ export class ReviewStore extends EventEmitter {
     };
     return this.data.items
       .filter((it) => (!file || it.file === file) && (!status || status === 'all' || it.status === status) && (!kind || it.kind === kind) && (!author || it.author === author))
-      .map((it) => this.withLocation(it, textOf(it.file)))
+      .map((it) => (it.ask ? { ...this.withLocation(it, textOf(it.file)), ...askInfo(it, this.data.items) } : this.withLocation(it, textOf(it.file))))
       .sort((a, b) => (a.file === b.file ? (a.from ?? Infinity) - (b.from ?? Infinity) : a.file.localeCompare(b.file)));
   }
 
   withLocation(item, text) {
     const loc = text == null || item.status === 'accepted' ? null : locate(item, text);
-    if (!loc) return { ...item, orphaned: item.status !== 'accepted', from: null, to: null, line: null };
+    // text == null: the file itself is gone (deleted or renamed outside Margin). Its items are kept, not dropped.
+    if (!loc) return { ...item, orphaned: item.status !== 'accepted', fileMissing: text == null, from: null, to: null, line: null };
     return { ...item, orphaned: false, from: loc.from, to: loc.to, line: lineOf(text, loc.from), endLine: lineOf(text, loc.to) };
   }
 
   // ---------- creation ----------
 
-  addSuggestion({ file, original, replacement, rationale = '', author = 'claude', line, contextBefore }) {
+  addSuggestion({ file, original, replacement, rationale = '', author = 'claude', line, contextBefore, askId }) {
     if (original === replacement) throw new Error('replacement is identical to original');
     if (typeof replacement !== 'string') throw new Error('replacement is required (use an empty string to propose a deletion)');
     const { text, match } = this.findUnique(file, original, { line, contextBefore });
@@ -123,16 +198,29 @@ export class ReviewStore extends EventEmitter {
     if (overlapping) {
       throw new Error(`This text overlaps open suggestion ${overlapping.id.slice(0, 8)} (line ${overlapping.line}). Reply to or withdraw that one first, or make one combined suggestion.`);
     }
-    return this.insert({ kind: 'suggestion', file, text, match, replacement, body: rationale, author });
+    const extra = this.askLink(askId);
+    return this.insert({ kind: 'suggestion', file, text, match, replacement, body: rationale, author, extra });
   }
 
-  addComment({ file, quote, comment, author = 'claude', line, contextBefore }) {
+  // ask: true marks a comment the author addressed to Claude ("Ask Claude" in the editor).
+  // askId links Claude's comment to the ask it answers. Both are optional fields on an
+  // ordinary comment, so review.json stays at the same version and older builds simply
+  // show an ask as one of the author's comments.
+  addComment({ file, quote, comment, author = 'claude', line, contextBefore, ask, askId }) {
     if (!comment || !comment.trim()) throw new Error('comment text is required');
+    const extra = ask === true && author === 'you' ? { ask: true } : this.askLink(askId);
     const { text, match } = this.findUnique(file, quote, { line, contextBefore });
-    return this.insert({ kind: 'comment', file, text, match, body: comment, author });
+    return this.insert({ kind: 'comment', file, text, match, body: comment, author, extra });
   }
 
-  insert({ kind, file, text, match, replacement, body, author }) {
+  askLink(askId) {
+    if (askId == null || askId === '') return {};
+    const ask = this.get(String(askId));
+    if (!ask.ask) throw new Error(`${String(askId).slice(0, 8)} is not one of the author's asks (get_asks lists them)`);
+    return { askId: ask.id };
+  }
+
+  insert({ kind, file, text, match, replacement, body, author, extra = {} }) {
     const item = {
       id: crypto.randomUUID(),
       kind,
@@ -142,6 +230,7 @@ export class ReviewStore extends EventEmitter {
       contextAfter: text.slice(match.to, match.to + CONTEXT),
       hintOffset: match.from,
       ...(kind === 'suggestion' ? { replacement } : {}),
+      ...extra,
       body,
       author,
       status: 'open',
@@ -259,6 +348,30 @@ export class ReviewStore extends EventEmitter {
     return item;
   }
 
+  // ---------- asks (comments the author addressed to Claude) ----------
+
+  // Open asks still waiting on Claude (the author has the last word), oldest first.
+  // states: 'waiting' only those not yet handed to Claude; default also 'picked-up'.
+  pendingAsks({ states = ['waiting', 'picked-up'] } = {}) {
+    return this.list({ status: 'open', kind: 'comment', author: 'you' })
+      .filter((it) => it.ask && states.includes(it.askState))
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  }
+
+  // Record that Claude has received these asks (via the prompt hook or an MCP tool), so the
+  // author sees "Claude is on it" instead of "Waiting".
+  markPickedUp(ids, via) {
+    const now = new Date().toISOString();
+    let n = 0;
+    for (const id of ids) {
+      const item = this.data.items.find((it) => it.id === id);
+      if (!item || !item.ask) continue;
+      item.pickedUpAt = now; item.pickedUpVia = via; n++;
+    }
+    if (n) this.save();
+    return n;
+  }
+
   remove(id) {
     const item = this.get(id);
     this.data.items = this.data.items.filter((it) => it !== item);
@@ -266,22 +379,64 @@ export class ReviewStore extends EventEmitter {
     return item;
   }
 
+  // Suggestions accepted at or after `since` (anything Date.parse reads), newest first. This is
+  // all "since a Claude session" can honestly mean: there is no session id in the data, only
+  // decidedAt. Items cleared from the panel live on in .review/archive.json and still count.
+  // `line` is where the applied text sits now (null if it was edited away or the file is gone).
+  // Read-only: the archive is written by clearClosed() above, never here.
+  acceptedSince(since) {
+    const t = Date.parse(since);
+    if (!Number.isFinite(t)) throw new Error('"since" must be a date and time, e.g. 2026-10-29T09:30:00Z');
+    const archived = this.archivedItems();
+    const seen = new Set(this.data.items.map((it) => it.id));
+    const texts = new Map();
+    const textOf = (f) => { if (!texts.has(f)) { try { texts.set(f, this.project.read(f)); } catch { texts.set(f, null); } } return texts.get(f); };
+    return [...this.data.items.map((it) => ({ it, archived: false })), ...archived.filter((it) => !seen.has(it.id)).map((it) => ({ it, archived: true }))]
+      .filter(({ it }) => it.kind === 'suggestion' && it.status === 'accepted' && Date.parse(it.decidedAt) >= t)
+      .map(({ it, archived: isArchived }) => {
+        const text = textOf(it.file);
+        const span = text == null ? null : locateApplied(it, text);
+        return {
+          id: it.id, file: it.file, quote: it.quote, replacement: it.appliedReplacement ?? it.replacement ?? '', rationale: it.body || '',
+          author: it.author, decidedBy: it.decidedBy || null, decidedAt: it.decidedAt, archived: isArchived,
+          fileMissing: text == null, line: span ? lineOf(text, span.from) : null,
+        };
+      })
+      .sort((a, b) => b.decidedAt.localeCompare(a.decidedAt));
+  }
+
   // Removes accepted/rejected items. They are appended to .review/archive.json first,
   // so this is recoverable by hand.
   clearClosed() {
     const removed = this.data.items.filter((it) => it.status !== 'open');
     if (!removed.length) return 0;
-    const archive = path.join(path.dirname(this.file), 'archive.json');
-    let old = [];
-    try { old = JSON.parse(fs.readFileSync(archive, 'utf8')).items || []; } catch { /* none yet */ }
+    // load() throws for an archive from a newer Margin (nothing is removed then) and moves an
+    // unreadable one aside (keeping its bytes) before starting a new archive.
+    const loaded = this.archive.load();
+    const old = loaded ? loaded.data.items : [];
     const stamp = new Date().toISOString();
-    fs.mkdirSync(path.dirname(archive), { recursive: true });
-    fs.writeFileSync(archive + '.tmp', JSON.stringify({ items: [...old, ...removed.map((it) => ({ ...it, archivedAt: stamp }))] }, null, 2));
-    fs.renameSync(archive + '.tmp', archive);
+    this.archive.save({ version: ARCHIVE_VERSION, items: [...old, ...removed.map((it) => ({ ...it, archivedAt: stamp }))] });
     this.data.items = this.data.items.filter((it) => it.status === 'open');
     this.save();
     return removed.length;
   }
+}
+
+// ---------- asks ----------
+
+// Where an ask stands, derived from its thread so nothing has to be kept in sync:
+//   waiting    the author has the last word and Claude has not received it yet
+//   picked-up  Claude received it (prompt hook, get_asks or list_review) since then
+//   answered   Claude replied, or linked a suggestion/comment to it, since then
+//   done       resolved
+// A follow-up reply by the author puts it back to waiting.
+export function askInfo(item, all) {
+  const linked = all.filter((x) => x.askId === item.id);
+  let authorAt = item.createdAt;
+  for (const r of item.replies || []) if (r.author !== 'claude' && r.createdAt > authorAt) authorAt = r.createdAt;
+  const answered = (item.replies || []).some((r) => r.author === 'claude' && r.createdAt >= authorAt) || linked.some((x) => x.createdAt >= authorAt);
+  const askState = item.status !== 'open' ? 'done' : answered ? 'answered' : item.pickedUpAt && item.pickedUpAt >= authorAt ? 'picked-up' : 'waiting';
+  return { askState, linked: linked.map((x) => x.id) };
 }
 
 // ---------- anchoring helpers ----------
@@ -324,7 +479,7 @@ export function locate(item, text) {
 // Non-empty replacements reuse findAll/locate with the item's original context and the
 // offset recorded at accept time. A deletion leaves nothing to match, so the gap is found
 // between the surrounding context instead (shrinking the window if that context was edited).
-function locateApplied(item, text) {
+export function locateApplied(item, text) {
   const applied = item.appliedReplacement ?? '';
   const core = applied.trim();
   if (core) {

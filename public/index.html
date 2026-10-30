@@ -6,10 +6,14 @@
   <title>Margin</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%232f7a55'/%3E%3Cpath d='M9 23V9l7 9 7-9v14' fill='none' stroke='white' stroke-width='2.6' stroke-linejoin='round' stroke-linecap='round'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="/style.css">
+  <!-- Apply a forced light/dark theme and the split-screen layout before first paint (see web/src/settings.js). -->
+  <script>try { var t = localStorage.getItem('margin:theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}
+  try { var l = localStorage.getItem('margin:layout'); } catch (e) {} document.documentElement.dataset.layout = l === 'split' || (l !== 'standard' && innerHeight <= 660) ? 'split' : 'standard';</script>
 </head>
 <body>
   <header class="topbar">
     <div class="brand">
+      <a id="hub-link" class="hub-link hidden" href="/" title="All your papers (the Margin hub)">‹ Papers</a>
       <span class="logo" aria-hidden="true">M</span>
       <span id="project-name" class="project"></span>
       <span class="sep">/</span>
@@ -32,15 +36,43 @@
           <p class="fine">Match the compiler and TeX Live version set in your Overleaf project menu.</p>
         </div>
       </div>
+      <button id="btn-search" class="btn top" title="Find and replace in the whole project (Ctrl/⌘ + Shift + F)">Find</button>
+      <button id="btn-changes" class="btn top" title="What changed since your last sync, and a marked-up PDF for resubmission">Changes</button>
       <button id="btn-logs" class="btn top" title="Errors and warnings">Logs <span id="log-badge" class="badge hidden"></span></button>
       <button id="btn-review" class="btn top active" title="Show/hide review panel">Review <span id="review-badge" class="badge hidden"></span></button>
       <button id="btn-sync" class="btn top sync" title="Commit your changes, pull from Overleaf, push"><span class="spin" aria-hidden="true"></span>Sync with Overleaf</button>
+      <div class="settings-group">
+        <button id="btn-settings" class="btn top" title="Appearance" aria-label="Appearance settings" aria-expanded="false">Aa</button>
+        <div id="settings-menu" class="popover right hidden">
+          <div class="field"><span>Theme</span>
+            <div class="seg" role="group" aria-label="Theme">
+              <button type="button" data-theme-choice="system">System</button>
+              <button type="button" data-theme-choice="light">Light</button>
+              <button type="button" data-theme-choice="dark">Dark</button>
+            </div>
+          </div>
+          <label>Editor font size <select id="set-font-size"></select></label>
+          <div class="field"><span>Layout</span>
+            <div class="seg" role="group" aria-label="Layout">
+              <button type="button" data-layout-choice="auto">Auto</button>
+              <button type="button" data-layout-choice="standard">Standard</button>
+              <button type="button" data-layout-choice="split">Split screen</button>
+            </div>
+            <span class="fine">Split screen packs Margin into a short window above your Claude terminal. Auto uses it when the window is 660 px tall or less.</span>
+          </div>
+          <div class="field"><span>Notifications</span>
+            <label id="notify-label" class="check"><input type="checkbox" id="set-notify"> Notify me when Claude is done or needs me</label>
+            <span id="notify-hint" class="fine">Only while this page is in the background. Also when Overleaf has new commits.</span>
+          </div>
+          <p id="settings-where" class="fine">Saved in this browser, not in the paper.</p>
+        </div>
+      </div>
     </div>
   </header>
 
   <main class="workspace">
     <aside class="pane files">
-      <div class="pane-head"><span>Files</span></div>
+      <div class="pane-head"><span>Files</span><span class="spacer"></span><button id="btn-new" class="btn sm ghost" title="New file or folder" aria-label="New file or folder" aria-haspopup="menu">+</button></div>
       <div id="tree" class="tree"></div>
       <div id="outline" class="outline">
         <div class="pane-head outline-head"><span>Outline</span><button class="outline-toggle" aria-expanded="true" title="Collapse outline">▾</button></div>
@@ -53,6 +85,7 @@
         <span id="current-file" class="current-file"></span>
         <span id="save-state" class="save-state"></span>
         <span class="spacer"></span>
+        <button id="btn-ask" class="btn sm ask" disabled title="Ask Claude about the selection (Ctrl/⌘ + Alt + A)">Ask Claude</button>
         <button id="btn-comment" class="btn sm ghost" disabled title="Comment on selection (Ctrl/⌘ + Alt + C)">+ Comment</button>
         <button id="btn-forward" class="btn sm ghost" title="Show this line in the PDF (Ctrl/⌘ + Alt + →)">→ PDF</button>
       </div>
@@ -63,14 +96,17 @@
 
     <aside id="review" class="pane review-pane">
       <div class="pane-head">
-        <span>Review</span>
-        <span class="spacer"></span>
-        <div class="seg">
-          <button data-scope="file" class="on">This file</button>
-          <button data-scope="all">All</button>
+        <div class="seg rail-mode" role="group" aria-label="Review panel view">
+          <button type="button" data-rail="review" class="on" title="Suggestions and comments">Review</button>
+          <button type="button" data-rail="response" title="Point-by-point response to the referees">Response <span id="response-badge" class="rail-badge hidden"></span></button>
+          <button type="button" data-rail="context" title="Your private notes, discussions and drafts for Claude (stay on this computer)">Context <span id="context-count" class="rail-count hidden"></span></button>
         </div>
       </div>
       <div class="review-sub">
+        <div class="seg review-only">
+          <button data-scope="file" class="on">This file</button>
+          <button data-scope="all">All</button>
+        </div>
         <label class="check"><input type="checkbox" id="show-closed"> Show closed</label>
         <div id="bulk" class="bulk"></div>
       </div>
@@ -83,7 +119,25 @@
           <span class="fine">⌘/Ctrl + Enter</span>
         </div>
       </div>
+      <div id="ask-box" class="ask-box hidden" role="group" aria-label="Ask Claude">
+        <div class="ask-head"><span class="avatar claude" aria-hidden="true">C</span><strong>Ask Claude</strong><span class="fine">about the selected text</span></div>
+        <div class="quote small"></div>
+        <div class="ask-starters">
+          <button type="button" data-ask="Make this more concise.">Concise</button>
+          <button type="button" data-ask="Is this claim supported? Check it against the results and the citations.">Check claim</button>
+          <button type="button" data-ask="Fix grammar, typos and awkward phrasing.">Grammar</button>
+          <button type="button" data-ask="Does this need a citation? Suggest one if so.">Citation?</button>
+        </div>
+        <textarea rows="2" placeholder="What should Claude do with it?"></textarea>
+        <div class="row">
+          <button class="btn sm claude submit">Ask Claude</button>
+          <button class="btn sm cancel">Cancel</button>
+          <span class="fine">⌘/Ctrl + Enter</span>
+        </div>
+      </div>
       <div id="cards" class="cards"></div>
+      <div id="response" class="response hidden"></div>
+      <div id="context" class="context hidden" role="region" aria-label="Private context"></div>
     </aside>
 
     <div id="splitter" class="splitter" role="separator" aria-orientation="vertical" title="Drag to resize"></div>
@@ -93,11 +147,28 @@
         <button id="zoom-out" class="btn sm ghost" aria-label="Zoom out">−</button>
         <button id="zoom-fit" class="btn sm ghost zoom-label"><span id="zoom-label">Fit</span></button>
         <button id="zoom-in" class="btn sm ghost" aria-label="Zoom in">+</button>
+        <div id="pdf-find" class="pdf-find" role="search">
+          <input class="pdf-find-q" type="text" placeholder="Find in PDF" aria-label="Find in PDF" autocomplete="off" spellcheck="false">
+          <span class="pdf-find-count" aria-live="polite"></span>
+          <button class="btn sm ghost pdf-find-prev" aria-label="Previous match" title="Previous match (Shift+Enter)" disabled>↑</button>
+          <button class="btn sm ghost pdf-find-next" aria-label="Next match" title="Next match (Enter)" disabled>↓</button>
+        </div>
         <span class="spacer"></span>
         <span id="page-label" class="page-label"></span>
         <a class="btn sm ghost" href="/pdf" download title="Download PDF">Download</a>
       </div>
-      <div id="pdf-scroll" class="pdf-scroll">
+      <div id="diff-bar" class="diff-bar hidden" role="status">
+        <span class="diff-tag">DIFF</span>
+        <span id="diff-text" class="diff-text"></span>
+        <span class="diff-break" aria-hidden="true"></span>
+        <span id="diff-legend" class="diff-legend"></span>
+        <span class="spacer"></span>
+        <button id="diff-notes-btn" class="btn sm ghost hidden" aria-expanded="false"></button>
+        <button id="diff-rebuild" class="btn sm ghost" title="Build the diff PDF again from the paper as it is now">Rebuild</button>
+        <button id="diff-back" class="btn sm">Back to normal PDF</button>
+        <div id="diff-notes" class="diff-notes hidden"></div>
+      </div>
+      <div id="pdf-scroll" class="pdf-scroll" tabindex="-1">
         <div id="pdf-pages" class="pdf-pages"></div>
         <div id="pdf-empty" class="pdf-empty"><p>No PDF yet.</p><p class="fine">Recompile to build it. Double-click the PDF to jump to the source.</p></div>
       </div>
@@ -105,10 +176,75 @@
         <div class="logs-head">
           <strong>Compile log</strong>
           <span class="spacer"></span>
-          <button id="btn-rawlog" class="btn sm ghost">Raw log</button>
+          <a id="btn-rawlog" class="btn sm ghost" href="/api/compile/log.txt" target="_blank" rel="noopener">Raw log</a>
           <button class="btn sm ghost close" aria-label="Close">✕</button>
         </div>
         <div id="log-list" class="log-list"></div>
+      </div>
+      <div id="changes" class="changes hidden" role="region" aria-label="Changes">
+        <div class="logs-head">
+          <strong>Changes</strong>
+          <span id="changes-count" class="fine"></span>
+          <span class="spacer"></span>
+          <button id="changes-refresh" class="btn sm ghost" title="Look again">Refresh</button>
+          <button class="btn sm ghost close" aria-label="Close">✕</button>
+        </div>
+        <div class="changes-modes">
+          <div class="seg" role="group" aria-label="What to compare">
+            <button type="button" data-mode="sync" class="on" title="Everything you have that Overleaf does not: committed here and not pushed, plus edits not yet committed">Since last sync</button>
+            <button type="button" data-mode="head" title="Edits not yet committed">Uncommitted</button>
+            <button type="button" data-mode="accepted" title="Suggestions you accepted in Margin since a time">Accepted suggestions</button>
+          </div>
+          <span id="changes-expand" class="changes-expand">
+            <button type="button" class="btn sm ghost" data-expand="all">Expand all</button>
+            <button type="button" class="btn sm ghost" data-expand="none">Collapse all</button>
+          </span>
+        </div>
+        <div id="changes-since" class="changes-since hidden">
+          <label>Accepted since
+            <select id="changes-since-sel" aria-label="Accepted since">
+              <option value="sync">the last sync</option>
+              <option value="1h">an hour ago</option>
+              <option value="24h">24 hours ago</option>
+              <option value="7d">7 days ago</option>
+              <option value="custom">a time I choose&hellip;</option>
+            </select>
+          </label>
+          <input id="changes-since-time" type="datetime-local" class="hidden" aria-label="Accepted since this time">
+        </div>
+        <div id="changes-note" class="changes-note"></div>
+        <div id="changes-list" class="changes-list"></div>
+        <div id="changes-foot" class="changes-foot">
+          <div class="cf-row">
+            <label for="diff-ref">Diff PDF against</label>
+            <select id="diff-ref" aria-label="Compare the diff PDF with"></select>
+            <button id="diff-make" class="btn sm primary" title="Mark every change since that version in a PDF, like Word's Track Changes. Your normal PDF is not touched.">Make diff PDF</button>
+          </div>
+          <div id="diff-status" class="cf-status"></div>
+        </div>
+      </div>
+      <div id="search" class="search hidden" role="search" aria-label="Find in project">
+        <div class="logs-head">
+          <strong>Find in project</strong>
+          <span id="search-count" class="fine"></span>
+          <span class="spacer"></span>
+          <button class="btn sm ghost close" aria-label="Close">✕</button>
+        </div>
+        <div class="search-form">
+          <div class="search-row">
+            <input id="search-q" type="text" placeholder="Find" aria-label="Find" autocomplete="off" spellcheck="false">
+            <button type="button" class="opt" data-opt="case" aria-pressed="false" title="Match case">Aa</button>
+            <button type="button" class="opt" data-opt="whole" aria-pressed="false" title="Whole word">ab</button>
+            <button type="button" class="opt" data-opt="regex" aria-pressed="false" title="Regular expression">.*</button>
+          </div>
+          <div class="search-row">
+            <input id="search-r" type="text" placeholder="Replace with" aria-label="Replace with" autocomplete="off" spellcheck="false">
+            <button id="search-all" class="btn sm" disabled title="Replace every match in every file listed below">Replace all</button>
+          </div>
+          <div id="search-confirm" class="search-confirm hidden" role="alert"></div>
+          <div id="search-note" class="search-note"></div>
+        </div>
+        <div id="search-results" class="search-results"></div>
       </div>
     </section>
   </main>
@@ -116,6 +252,8 @@
   <footer class="statusbar">
     <span id="conn" class="dot off" title="Connecting…"></span>
     <span id="git-status"></span>
+    <button id="claude-status" class="claude-status off" type="button">Claude</button>
+    <button id="btn-split-claude" class="wc-btn hidden" type="button" title="Put this window on the top of the screen and Terminal running claude in a strip below it">Claude terminal</button>
     <span class="spacer"></span>
     <span id="wc-sel" class="hidden"></span>
     <button id="wc-btn" class="wc-btn" title="Word count" aria-expanded="false">– words</button>
