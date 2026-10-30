@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Fix (privacy): when the paper folder was a subfolder of its git repository, a linked worktree or
+  a submodule, Margin did not keep its own folders out of git, so Sync could commit `.review/`
+  (review history, referee reports, private context notes) and push it to Overleaf. The
+  exclusions are now written wherever git keeps them.
 - **Private context for Claude.** A new **Context** view in the review panel keeps your own
   background for a paper (discussions, notes from calls, drafts, slides as `.md`, `.txt` or
   `.pdf`): drop files on it, use **Add files…**, or type or paste a note; give each a description;

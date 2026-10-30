@@ -89,11 +89,15 @@ function readJson(file) {
 // `margin init` writes them, but `margin <dir>` runs happily on a repo that was never
 // inited, so the server calls this on startup too. Returns the entries it added.
 export function ensureLocalOnlyExcluded(dir) {
-  const gitDir = path.join(dir, '.git');
-  let st;
-  try { st = fs.statSync(gitDir); } catch { return []; }
-  if (!st.isDirectory()) return []; // linked worktree or submodule: .git is a file, not a dir
-  const excludeFile = path.join(gitDir, 'info', 'exclude');
+  // Ask git where the exclude file is: the paper folder may be a subfolder of its repository (no
+  // .git here at all), a linked worktree or a submodule (.git is a file). Skipping those cases left
+  // .review/ (review history, referee reports, private context notes) to be committed by Sync.
+  // The patterns have no leading slash, so they match the paper's folders at any depth.
+  let excludeFile;
+  try {
+    excludeFile = execFileSync('git', ['rev-parse', '--path-format=absolute', '--git-path', 'info/exclude'], { cwd: dir, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
+  } catch { return []; } // not a git repository (or no git): nothing can be committed
+  if (!excludeFile) return [];
   const current = fs.existsSync(excludeFile) ? fs.readFileSync(excludeFile, 'utf8') : '';
   const missing = LOCAL_ONLY.filter((p) => !current.split('\n').includes(p));
   if (!missing.length) return [];

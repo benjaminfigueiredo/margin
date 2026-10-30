@@ -1050,6 +1050,36 @@ if (running) {
   console.log('excluded; `git add -A` would not stage any of them');
 }
 
+step('git: Margin\'s files stay out of git when the paper is a subfolder of its repo, or a linked worktree');
+{
+  // In both cases there is no .git folder in the paper folder (none at all, or a .git *file*), and the
+  // exclusions used to be skipped silently: Sync's `git add -A` would then commit .review/ (review
+  // history, referee reports, private context notes) and push it to Overleaf.
+  const { ensureLocalOnlyExcluded } = await import('../server/init.js');
+  const sh = (cwd, ...a) => execFileSync('git', a, { cwd, stdio: 'pipe' }).toString();
+  const g = fs.mkdtempSync(path.join(os.tmpdir(), 'margin-exclude-'));
+  const repo = path.join(g, 'repo');
+  fs.mkdirSync(path.join(repo, 'paper'), { recursive: true });
+  sh(repo, 'init', '-q');
+  fs.writeFileSync(path.join(repo, 'paper', 'main.tex'), 'x\n');
+  sh(repo, 'add', '-A'); sh(repo, 'commit', '-qm', 'init');
+  const linked = path.join(g, 'linked');
+  sh(repo, 'worktree', 'add', '-q', linked);
+  for (const dir of [path.join(repo, 'paper'), path.join(linked, 'paper')]) {
+    // (a linked worktree shares its repository's exclude file, so the second call may add nothing)
+    ensureLocalOnlyExcluded(dir);
+    fs.mkdirSync(path.join(dir, '.review', 'context'), { recursive: true });
+    fs.writeFileSync(path.join(dir, '.review', 'context', 'call-notes.md'), 'private\n');
+    fs.mkdirSync(path.join(dir, '.margin-build'), { recursive: true });
+    fs.writeFileSync(path.join(dir, '.margin-build', 'main.pdf'), 'x');
+    const status = sh(dir, 'status', '--porcelain', '--untracked-files=all');
+    assert.ok(!/\.review|\.margin-build/.test(status), `git would stage Margin's files in ${path.relative(g, dir)}:\n${status}`);
+    assert.deepEqual(ensureLocalOnlyExcluded(dir), [], 'idempotent');
+  }
+  fs.rmSync(g, { recursive: true, force: true });
+  console.log('subfolder paper and linked worktree: .review/ and .margin-build/ excluded');
+}
+
 // Response to referees (server/responses.js). Its own server on a fresh git copy of the
 // sample paper, so `git status` can be checked before anything is accepted. The report
 // below is invented for the test.
