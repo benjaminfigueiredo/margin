@@ -18,25 +18,36 @@ export async function isRepo(project) {
   return r.ok && r.stdout.trim() === 'true';
 }
 
+// The paper folder may sit in a subfolder of its repository. `status --porcelain` reports paths
+// from the repository root; Margin (and the author) think relative to the paper folder.
+// Returns a function that turns a root-relative path into a paper-relative one.
+async function paperRelative(project) {
+  const r = await git(project, ['rev-parse', '--show-prefix']);
+  const prefix = r.ok ? r.stdout.trim() : '';
+  return (p) => (prefix && p.startsWith(prefix) ? p.slice(prefix.length) : p);
+}
+
 export async function status(project) {
   if (!(await isRepo(project))) return { repo: false };
+  const rel = await paperRelative(project);
   const [branch, porcelain, remote, upstream] = await Promise.all([
     git(project, ['rev-parse', '--abbrev-ref', 'HEAD']),
-    git(project, ['status', '--porcelain']),
+    git(project, ['-c', 'core.quotepath=false', 'status', '--porcelain', '--', '.']),
     git(project, ['remote', 'get-url', 'origin']),
     git(project, ['rev-list', '--left-right', '--count', '@{u}...HEAD']),
   ]);
   const rawStatus = porcelain.stdout.split('\n').filter(Boolean);
-  const changed = rawStatus.map((l) => ({ status: l.slice(0, 2).trim(), path: l.slice(3) }));
+  const relPath = (p) => p.split(' -> ').map(rel).join(' -> '); // a rename lists both ends
+  const changed = rawStatus.map((l) => ({ status: l.slice(0, 2).trim(), path: relPath(l.slice(3)) }));
   // Unmerged porcelain codes. behind/ahead are both 0 while a conflict is unresolved,
   // so this is the only thing that distinguishes a conflicted tree from a clean one.
-  const conflicted = rawStatus.filter((l) => UNMERGED.has(l.slice(0, 2))).map((l) => l.slice(3));
+  const conflicted = rawStatus.filter((l) => UNMERGED.has(l.slice(0, 2))).map((l) => relPath(l.slice(3)));
   let behind = null; let ahead = null;
   let incoming = [];
   if (upstream.ok) [behind, ahead] = upstream.stdout.trim().split(/\s+/).map(Number);
   if (behind > 0) {
     // Files the remote changed since we diverged (three-dot: only their side).
-    const d = await git(project, ['diff', '--name-only', 'HEAD...@{u}']);
+    const d = await git(project, ['diff', '--name-only', '--relative', 'HEAD...@{u}']);
     if (d.ok) incoming = d.stdout.split('\n').filter(Boolean);
   }
   return {
@@ -87,9 +98,9 @@ export async function sync(project, { message = 'Edits via Margin', push = true 
     await step('mark resolved', ['add', '--', ...unresolved]);
   }
 
-  const st = await git(project, ['status', '--porcelain']);
+  const st = await git(project, ['status', '--porcelain', '--', '.']);
   if (st.stdout.trim()) {
-    await step('stage', ['add', '-A']);
+    await step('stage', ['add', '-A', '--', '.']); // the paper folder: what the Sync confirmation lists
     const c = await step('commit', ['commit', '-m', message]);
     if (!c.ok) return { ok: false, steps };
   }
@@ -104,7 +115,7 @@ export async function sync(project, { message = 'Edits via Margin', push = true 
       const b = (await git(project, ['rev-parse', '--abbrev-ref', 'HEAD'])).stdout.trim();
       return { ok: false, steps, hint: `The branch "${b}" is not tracking anything on Overleaf, which only supports one branch (master). Your commit is safe on "${b}"; switch back with "git checkout master" and sync from there.` };
     }
-    const conflicted = (await git(project, ['diff', '--name-only', '--diff-filter=U'])).stdout.trim();
+    const conflicted = (await git(project, ['diff', '--name-only', '--relative', '--diff-filter=U'])).stdout.trim();
     if (conflicted) {
       await step('abort rebase', ['rebase', '--abort']);
       return { ok: false, conflict: conflicted.split('\n'), steps, hint: 'Overleaf has changes that conflict with yours in these files. Your commit is safe locally; resolve with git (or ask Claude to) and sync again.' };
@@ -136,7 +147,7 @@ export async function pull(project) {
 }
 
 async function conflictedPaths(project) {
-  const r = await git(project, ['diff', '--name-only', '--diff-filter=U']);
+  const r = await git(project, ['diff', '--name-only', '--relative', '--diff-filter=U']);
   return r.ok ? r.stdout.split('\n').filter(Boolean) : [];
 }
 

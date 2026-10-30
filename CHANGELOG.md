@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Fix: when the paper folder is a subfolder of its git repository, the Sync confirmation, the
+  conflict messages and the incoming-changes list named files relative to the repository instead
+  of the paper folder, and a conflict there could not be resolved by Sync. Sync now also commits
+  only the paper folder, which is what the confirmation lists.
 - Fix: a find or replace with a regular expression that backtracks catastrophically (for example
   `(a+)+$` on a long line) could freeze Margin. Matching now stops after 3 seconds with "The
   expression took too long to match", and nothing is changed.

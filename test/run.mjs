@@ -1311,6 +1311,58 @@ step('git: a conflicted pull is reported, and Sync refuses to commit conflict ma
   assert.equal(fs.readFileSync(path.join(l.mine, 'notes.tex'), 'utf8'), 'my own notes\n', "the author's file is untouched");
   fs.rmSync(l.g, { recursive: true, force: true });
 
+  // The paper folder is a subfolder of its repository: paths are relative to the paper folder
+  // (what the author sees and Project.abs expects), not to the repository root.
+  {
+    const g = fs.mkdtempSync(path.join(os.tmpdir(), 'margin-subdir-'));
+    const bare = path.join(g, 'remote.git');
+    sh(g, 'init', '-q', '--bare', '-b', 'master', bare);
+    const mine = path.join(g, 'mine'), theirs = path.join(g, 'theirs');
+    sh(g, 'clone', '-q', bare, mine);
+    fs.mkdirSync(path.join(mine, 'paper', 'sections'), { recursive: true });
+    fs.writeFileSync(path.join(mine, 'paper', 'main.tex'), 'one\ntwo\nthree\n');
+    fs.writeFileSync(path.join(mine, 'paper', 'sections', 'a.tex'), 'a\n');
+    fs.writeFileSync(path.join(mine, 'other.txt'), 'outside the paper\n');
+    sh(mine, 'add', '-A'); sh(mine, 'commit', '-qm', 'init'); sh(mine, 'push', '-q', '-u', 'origin', 'HEAD:master');
+    sh(g, 'clone', '-q', bare, theirs);
+    const paper = new Project(path.join(mine, 'paper'));
+
+    fs.writeFileSync(path.join(mine, 'paper', 'sections', 'a.tex'), 'a edited\n');
+    fs.writeFileSync(path.join(mine, 'paper', 'new.tex'), 'new\n');
+    fs.writeFileSync(path.join(mine, 'other.txt'), 'edited outside\n');
+    let st = await gStatus(paper);
+    assert.deepEqual(st.changed.map((c) => c.path).sort(), ['new.tex', 'sections/a.tex'], 'paths are relative to the paper folder, and only the paper is listed');
+    assert.ok(st.changed.every((c) => fs.existsSync(path.join(paper.root, c.path))), 'every listed path exists under the paper folder');
+
+    // Sync commits the paper folder (what the confirmation lists), not the rest of the repository
+    const s1 = await gSync(paper, { message: 'first subfolder sync' });
+    assert.equal(s1.ok, true, JSON.stringify(s1));
+    assert.match(sh(mine, 'show', 'origin/master:paper/sections/a.tex'), /a edited/);
+    assert.equal(sh(mine, 'show', 'origin/master:other.txt'), 'outside the paper\n', 'a change outside the paper folder is not committed');
+    fs.writeFileSync(path.join(mine, 'other.txt'), 'outside the paper\n');
+
+    // a co-author changes a paper file; incoming is named relative to the paper too
+    sh(theirs, 'pull', '-q');
+    fs.writeFileSync(path.join(theirs, 'paper', 'main.tex'), 'one\nTHEIR two\nthree\n');
+    sh(theirs, 'commit', '-qam', 'co-author'); sh(theirs, 'push', '-q');
+    sh(mine, 'fetch', '-q');
+    st = await gStatus(paper);
+    assert.equal(st.behind, 1);
+    assert.deepEqual(st.incoming, ['main.tex']);
+
+    // an unresolved conflict is named relative to the paper folder, and resolving it lets Sync through
+    fs.writeFileSync(path.join(mine, 'paper', 'main.tex'), 'one\nMY two\nthree\n');
+    const pr = await gPull(paper);
+    assert.equal(pr.ok, false); assert.deepEqual(pr.conflict, ['main.tex']);
+    st = await gStatus(paper);
+    assert.deepEqual(st.conflicted, ['main.tex']);
+    fs.writeFileSync(path.join(paper.root, 'main.tex'), 'one\nMERGED two\nthree\n');
+    const sr = await gSync(paper, { message: 'subfolder sync' });
+    assert.equal(sr.ok, true, JSON.stringify(sr));
+    assert.match(sh(mine, 'show', 'origin/master:paper/main.tex'), /MERGED two/);
+    fs.rmSync(g, { recursive: true, force: true });
+  }
+
   console.log('conflicted pull reported, Sync refuses it, junk stays local, no-upstream explained, refused pull passes git\'s reason');
 }
 
