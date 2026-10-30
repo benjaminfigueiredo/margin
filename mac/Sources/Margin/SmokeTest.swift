@@ -42,11 +42,11 @@ final class SmokeTest {
         check(hubPid != nil && !hub.attached, "the app started its own hub")
 
         step("the Papers window")
-        guard let papers = windows.papersWindow else { return abort("there is no Papers window") }
+        guard let papers = windows.papersWindow else { return giveUp("there is no Papers window") }
         let listReady = "String(document.readyState === 'complete' && !!document.querySelector('#btn-add') && !!document.querySelector('#empty') && !document.querySelector('#empty').classList.contains('hidden'))"
         guard await waitFor(seconds: 60, { await papers.evaluate(listReady) == "true" }) else {
             await describe(papers)
-            return abort("the Papers page did not load, or its script did not run (if nothing at all answered, WKWebView may not render in this session)")
+            return giveUp("the Papers page did not load, or its script did not run (if nothing at all answered, WKWebView may not render in this session)")
         }
         pass("the Papers page loaded and its script listed no papers (title “\(papers.window?.title ?? "")”)")
 
@@ -62,10 +62,10 @@ final class SmokeTest {
             try? FileManager.default.removeItem(at: paperDir)
             try FileManager.default.copyItem(at: URL(fileURLWithPath: source, isDirectory: true), to: paperDir)
         } catch {
-            return abort("could not copy \(source): \(error.localizedDescription)")
+            return giveUp("could not copy \(source): \(error.localizedDescription)")
         }
         await app.addAndOpen(folder: paperDir) // what File → Open Folder… does after its panel
-        guard let paper = windows.papers.first else { return abort("the hub did not add \(paperDir.path)") }
+        guard let paper = windows.papers.first else { return giveUp("the hub did not add \(paperDir.path)") }
         pass("the hub added \(paper.name) on port \(paper.port)")
 
         step("the paper's window")
@@ -79,7 +79,7 @@ final class SmokeTest {
         guard loaded, let paperWindow else {
             if let w = windows.window(forPaperPort: paper.port) ?? windows.paperWindows.first { await describe(w) }
             say("hub log:\n\(hub.logTail())")
-            return abort("the paper's window did not show a working editor (file loaded, WebSocket connected)")
+            return giveUp("the paper's window did not show a working editor (file loaded, WebSocket connected)")
         }
         pass("the paper opened in its own window, the editor loaded and its WebSocket connected (title “\(paperWindow.window?.title ?? "")”)")
 
@@ -144,7 +144,7 @@ final class SmokeTest {
     }
 
     /// A failure after which there is no point going on: still quit the normal way, so the hub stops.
-    func abort(_ message: String) {
+    func giveUp(_ message: String) {
         fail(message)
         quit()
     }

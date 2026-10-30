@@ -77,7 +77,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         hubReady = false
         if terminating { return }
         if let smoke {
-            smoke.abort("the hub exited unexpectedly: \(message)")
+            smoke.giveUp("the hub exited unexpectedly: \(message)")
             return
         }
         let answer = Alerts.show("The Margin hub stopped", "\(message)\n\nThe papers it ran stopped with it. Restart starts the hub again; then open your papers again from the Papers window.", buttons: ["Restart", "Quit"])
