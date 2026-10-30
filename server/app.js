@@ -121,19 +121,53 @@ export async function startServer({ root, port = 4242, main, engine, configDir, 
     return { settings, main: project.main };
   }));
   api.get('/tree', handle(async () => project.tree()));
+  // `hash` identifies the text the editor starts from; its saves send it back as `base` (below).
   api.get('/file', handle(async (req) => {
     const p = String(req.query.path || '');
-    const stat = fs.statSync(project.readPath(p));
-    return { path: p, content: project.read(p), mtime: stat.mtimeMs };
+    let stat;
+    try { stat = fs.statSync(project.readPath(p)); } catch (e) { if (e.code === 'ENOENT') e.status = 404; throw e; }
+    const content = project.read(p);
+    return { path: p, content, mtime: stat.mtimeMs, hash: textHash(content) };
   }));
-  api.put('/file', handle(async (req) => {
+  // Saving from the editor. Without `base` (older pages, scripts) the content simply replaces the
+  // file, as it always has. With `base`, the hash of the text the editor last loaded or saved, the
+  // write happens only if the file still holds exactly that text. Anything else (an accepted
+  // suggestion, a replace, Claude, git) means the buffer is stale: the answer is 409, never a silent
+  // overwrite, and the page merges or asks the author. A save may send its change as `edit`
+  // ({ from, to, text } against the base text) instead of the whole `content`, so that it fits in a
+  // keepalive request when the page is going away; `id` names a save, and `after: { id, edit |
+  // content }` is the same change made against that earlier save, for when the page cannot know
+  // which of the two the server will see first. Claude's MCP tools and the review store write
+  // through Project directly and are not affected.
+  api.put('/file', handle(async (req, res) => {
     const p = String(req.query.path || '');
-    if (typeof req.body.content !== 'string') throw new Error('content is required');
-    // exclusive=1: create only, never replace (the UI's "new file" uses it so it cannot clobber a file Claude just made).
-    project.write(p, req.body.content, { exclusive: req.query.exclusive === '1' });
-    noteSelfWrite(project.rel(project.abs(p)), req.body.content);
-    if (settings.autoCompile) scheduleAutoCompile();
-    return { ok: true, mtime: fs.statSync(project.abs(p)).mtimeMs };
+    const body = req.body || {};
+    if (body.base === undefined) {
+      if (typeof body.content !== 'string') throw new Error('content is required');
+      // exclusive=1: create only, never replace (the UI's "new file" uses it so it cannot clobber a file Claude just made).
+      project.write(p, body.content, { exclusive: req.query.exclusive === '1' });
+      return saved(p, body.content, body.id);
+    }
+    if (typeof body.base !== 'string') throw new Error('base must be a string');
+    const rel = project.rel(project.abs(p));
+    let current = null;
+    try { current = project.read(p); } catch (e) { if (e.code !== 'ENOENT') throw e; }
+    if (current === null) {
+      res.status(409).json({ error: `${rel} is no longer on disk.`, stale: true, missing: true });
+      return undefined;
+    }
+    const now = textHash(current);
+    const prev = lastSaves.get(rel);
+    let next = null;
+    if (now === body.base) next = changed(current, body);
+    else if (typeof body.after?.id === 'string' && prev?.id === body.after.id && prev.hash === now) next = changed(current, body.after);
+    else if (typeof body.content === 'string' && body.content === current) next = current; // already there (a retry)
+    if (next === null) {
+      res.status(409).json({ error: `${rel} changed on disk since the editor loaded it.`, stale: true, hash: now });
+      return undefined;
+    }
+    if (next !== current) project.write(p, next);
+    return saved(p, next, body.id);
   }));
   // ---- file management: folders, rename, delete, upload, reveal. All of it goes through Project's guard. ----
   api.post('/folder', handle(async (req) => ({ ok: true, ...project.mkdir(String(req.body?.path || '')) })));
@@ -263,6 +297,18 @@ export async function startServer({ root, port = 4242, main, engine, configDir, 
   // after an autosave is always reported as external. Entries are kept after a match (a single save can
   // produce more than one event), dropped on the first mismatch, and swept by age and count.
   const selfWrites = new Map();
+  // The last save from the editor per file (rel -> { id, hash }), for a save's `after` (PUT /file).
+  const lastSaves = new Map();
+  function saved(p, content, id) {
+    const rel = project.rel(project.abs(p));
+    const hash = textHash(content);
+    noteSelfWrite(rel, content);
+    lastSaves.delete(rel);
+    if (typeof id === 'string' && id) lastSaves.set(rel, { id, hash });
+    while (lastSaves.size > SELF_MAX) lastSaves.delete(lastSaves.keys().next().value);
+    if (settings.autoCompile) scheduleAutoCompile();
+    return { ok: true, mtime: fs.statSync(project.abs(p)).mtimeMs, hash };
+  }
   const SELF_TTL_MS = 30000, SELF_MAX = 500;
   const hashOf = (buf) => crypto.createHash('sha256').update(buf).digest('hex');
   function noteSelfWrite(rel, content) {
@@ -336,6 +382,17 @@ export async function startServer({ root, port = 4242, main, engine, configDir, 
 function inlineName(name) {
   const plain = name.replace(/[^\x20-\x7e]|["\\%;]/g, '_');
   return `inline; filename="${plain}"${plain === name ? '' : `; filename*=UTF-8''${encodeURIComponent(name)}`}`;
+}
+
+// The identity of a text file's contents as the editor sees them (decoded as UTF-8, as /api/file sends them).
+function textHash(text) { return crypto.createHash('sha256').update(text, 'utf8').digest('hex'); }
+
+// The new text of a save: its whole `content`, or its `edit` applied to the text it was made against.
+function changed(current, { content, edit }) {
+  if (typeof content === 'string') return content;
+  const ok = edit && typeof edit.text === 'string' && Number.isInteger(edit.from) && Number.isInteger(edit.to) && edit.from >= 0 && edit.from <= edit.to && edit.to <= current.length;
+  if (!ok) throw new Error('content, or an edit within the file, is required');
+  return current.slice(0, edit.from) + edit.text + current.slice(edit.to);
 }
 
 function summarize(r) {

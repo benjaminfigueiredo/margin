@@ -932,6 +932,76 @@ if (running) {
   fs.rmSync(abs(f), { force: true });
 }
 
+step('editor saves carry their base: a stale one is refused (409), never written over a newer file');
+{
+  const f = 'sections/base-test.tex';
+  const url = `/file${q(f)}`;
+  const disk = () => fs.readFileSync(path.join(paperRoot, f), 'utf8');
+  const sha = (t) => crypto.createHash('sha256').update(t, 'utf8').digest('hex');
+  // No base (older pages, scripts): replaces as it always has, and answers with the new hash.
+  let r = await fileApi('PUT', url, { json: { content: 'alpha\nbeta\n' } });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.hash, sha('alpha\nbeta\n'));
+  r = await fileApi('GET', url);
+  assert.equal(r.body.hash, sha('alpha\nbeta\n'), 'GET /file gives the hash of what it sends');
+  const h0 = r.body.hash;
+  // Matching base: saved; the new hash is the next base.
+  r = await fileApi('PUT', url, { json: { base: h0, content: 'alpha\nbeta\ngamma\n' } });
+  assert.equal(r.status, 200);
+  assert.equal(disk(), 'alpha\nbeta\ngamma\n');
+  const h1 = r.body.hash;
+  assert.equal(h1, sha(disk()));
+  // Stale base (the file changed since): refused, file untouched.
+  fs.writeFileSync(path.join(paperRoot, f), 'claude wrote this\n');
+  r = await fileApi('PUT', url, { json: { base: h1, content: 'stale buffer\n' } });
+  assert.equal(r.status, 409);
+  assert.equal(r.body.stale, true);
+  assert.equal(r.body.hash, sha('claude wrote this\n'));
+  assert.equal(disk(), 'claude wrote this\n', 'a stale save must not overwrite');
+  // Content identical to what is there: nothing to refuse (a retry after a lost answer).
+  r = await fileApi('PUT', url, { json: { base: h1, content: 'claude wrote this\n' } });
+  assert.equal(r.status, 200);
+  // An edit against the base text instead of the whole content.
+  const h2 = sha('claude wrote this\n');
+  r = await fileApi('PUT', url, { json: { base: h2, id: 's1', edit: { from: 7, to: 12, text: 'typed' } } });
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  assert.equal(disk(), 'claude typed this\n');
+  r = await fileApi('PUT', url, { json: { base: h2, edit: { from: 0, to: 0, text: 'x' } } });
+  assert.equal(r.status, 409, 'an edit against a stale base is refused too');
+  for (const edit of [{ from: 5, to: 2, text: '' }, { from: 0, to: 999, text: '' }, { from: -1, to: 0, text: '' }, { from: 0, to: 0 }, null]) {
+    r = await fileApi('PUT', url, { json: { base: sha(disk()), edit } });
+    assert.equal(r.status, 400, `bad edit ${JSON.stringify(edit)}`);
+  }
+  assert.equal(disk(), 'claude typed this\n');
+  r = await fileApi('PUT', url, { json: { base: 42, content: 'x' } });
+  assert.equal(r.status, 400, 'base must be a string');
+  // `after`: the same change against an earlier save that may have arrived first.
+  const hs1 = sha('claude typed this\n');
+  r = await fileApi('PUT', url, { json: { base: h2, id: 's2', edit: { from: 0, to: 0, text: 'NOPE' }, after: { id: 's1', edit: { from: 18, to: 18, text: 'more\n' } } } });
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  assert.equal(disk(), 'claude typed this\nmore\n', 'applied against the save it names');
+  assert.equal(r.body.hash, sha(disk()));
+  r = await fileApi('PUT', url, { json: { base: hs1, id: 's3', edit: { from: 0, to: 0, text: 'x' }, after: { id: 's1', edit: { from: 0, to: 0, text: 'y' } } } });
+  assert.equal(r.status, 409, '`after` names a save that is no longer the last one');
+  fs.writeFileSync(path.join(paperRoot, f), 'changed under the save\n');
+  r = await fileApi('PUT', url, { json: { base: h2, id: 's4', edit: { from: 0, to: 0, text: 'x' }, after: { id: 's2', edit: { from: 0, to: 0, text: 'y' } } } });
+  assert.equal(r.status, 409, '`after` only counts while the file still holds what that save wrote');
+  assert.equal(disk(), 'changed under the save\n');
+  // A file that is gone: refused with `missing`, not recreated; GET says 404.
+  fs.rmSync(path.join(paperRoot, f));
+  r = await fileApi('PUT', url, { json: { base: h2, content: 'recreate me\n' } });
+  assert.equal(r.status, 409);
+  assert.equal(r.body.missing, true);
+  assert.equal(fs.existsSync(path.join(paperRoot, f)), false, 'a save with a base never recreates a deleted file');
+  r = await fileApi('GET', url);
+  assert.equal(r.status, 404);
+  // Claude's writes (MCP tools, the review store) do not go through this check at all.
+  r = await fileApi('PUT', `${url}&exclusive=1`, { json: { content: 'back again\n' } });
+  assert.equal(r.status, 200, 'create-only PUT is unchanged');
+  fs.rmSync(path.join(paperRoot, f));
+  console.log('no base: replaces; matching base: saved; stale base: 409 and untouched; edit and after applied; missing: 409, not recreated');
+}
+
 // CLAUDE.md's hardest promise: nothing Margin creates may reach Overleaf. git.sync()
 // stages with `git add -A`, so this holds only if the local-only paths are in
 // .git/info/exclude. This harness never runs `margin init`, so a pass here proves the
