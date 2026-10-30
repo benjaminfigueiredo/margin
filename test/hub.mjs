@@ -14,14 +14,14 @@ import { startServer } from '../server/app.js';
 import { init } from '../server/init.js';
 import { claudeTerminalCommand, folderPickerCommand } from '../server/macos.js';
 import { resolveConfigDir } from '../server/config.js';
+import { freePort } from './free-port.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const BIN = path.join(here, '..', 'bin', 'margin.js');
 const step = (name) => console.log(`\n── hub: ${name}`);
 const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'margin-hub-')));
 const cfg = path.join(tmp, 'config');
-const rand = () => 44000 + Math.floor(Math.random() * 4000) * 2;
-const hubPort = rand();
+const hubPort = await freePort();
 const firstPaperPort = hubPort + 1;
 
 function makePaper(name) {
@@ -343,7 +343,7 @@ console.log('same ports after restart; picker and terminal commands built safely
 step('margin hub (CLI): ready line, and SIGKILL of the hub takes its papers with it');
 {
   const cfg2 = path.join(tmp, 'config-cli');
-  const port2 = rand() + 1;
+  const port2 = await freePort();
   const paperPort = port2 + 1;
   // A hand-written registry (what the hub would have written) with A on a known port.
   fs.mkdirSync(cfg2, { recursive: true });
@@ -373,7 +373,7 @@ step('margin hub (CLI): ready line, and SIGKILL of the hub takes its papers with
 step('SIGTERM to margin hub stops its papers; bare `margin` picks paper or hub by the folder');
 {
   const cfg3 = path.join(tmp, 'config-bare');
-  const port3 = rand() + 1;
+  const port3 = await freePort();
   const paperPort = port3 + 1;
   fs.mkdirSync(cfg3, { recursive: true });
   fs.writeFileSync(path.join(cfg3, 'projects.json'), JSON.stringify({ version: 1, projects: [{ id: a.id, path: paperA, name: 'paper-a', port: paperPort, addedAt: new Date().toISOString(), lastOpened: null }] }));
@@ -390,7 +390,7 @@ step('SIGTERM to margin hub stops its papers; bare `margin` picks paper or hub b
   assert.equal(code, 0);
   assert.ok(await waitGone(r.body.pid), 'SIGTERM stopped the paper before the hub exited');
   // In a paper folder, bare `margin` is the editor for it, exactly as before.
-  const port4 = rand() + 1;
+  const port4 = await freePort();
   const ed = spawn(process.execPath, [BIN, '--port', String(port4), '--no-open'], { cwd: paperB, env: { ...process.env, MARGIN_CONFIG_DIR: cfg3 }, stdio: ['ignore', 'pipe', 'pipe'] });
   let eout = ''; ed.stdout.on('data', (d) => { eout += d; });
   for (let i = 0; i < 100 && !eout.includes('Claude MCP'); i++) await sleep(100);

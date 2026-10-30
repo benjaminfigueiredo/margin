@@ -13,6 +13,7 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { startServer } from '../server/app.js';
 import { Project } from '../server/project.js';
+import { freePort } from './free-port.mjs';
 
 // Commits made by the server under test (Sync, pull --autostash) need a git identity. CI machines
 // have none configured, so give the test run its own instead of relying on the developer's.
@@ -28,7 +29,7 @@ if (!base) {
   fs.cpSync(path.join(here, '..', 'examples', 'sample-paper'), paper, { recursive: true });
   const git = (...a) => execFileSync('git', a, { cwd: paper, stdio: 'ignore' });
   git('init', '-q'); git('add', '-A'); git('-c', 'user.name=test', '-c', 'user.email=test@example.org', 'commit', '-qm', 'init');
-  const port = 43000 + Math.floor(Math.random() * 2000);
+  const port = await freePort();
   running = await startServer({ root: paper, port });
   base = `http://127.0.0.1:${port}`;
   console.log(`Test server on ${base} for ${paper}`);
@@ -850,7 +851,7 @@ step('response to referees: points, stances, linked suggestions, derived status,
   fs.cpSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'examples', 'sample-paper'), paper, { recursive: true });
   const git = (...a) => execFileSync('git', ['-c', 'user.name=test', '-c', 'user.email=test@example.org', ...a], { cwd: paper, stdio: 'pipe' }).toString();
   git('init', '-q'); git('add', '-A'); git('commit', '-qm', 'init');
-  const rport = 45000 + Math.floor(Math.random() * 2000);
+  const rport = await freePort();
   const srv = await startServer({ root: paper, port: rport });
   const rbase = `http://127.0.0.1:${rport}`;
   const rc = new Client({ name: 'margin-test-resp', version: '0' });
@@ -1058,7 +1059,7 @@ step('git: fetch makes status().behind real; timer only with a remote, cleared b
   fs.writeFileSync(path.join(mine, 'other.tex'), 'other\n');
   sh(mine, 'add', '-A'); sh(mine, 'commit', '-qm', 'init'); sh(mine, 'push', '-q', '-u', 'origin', 'HEAD:master');
   sh(g, 'clone', '-q', bare, theirs);
-  const gport = 45000 + Math.floor(Math.random() * 2000);
+  const gport = await freePort();
   const srv = await startServer({ root: mine, port: gport });
   const gbase = `http://127.0.0.1:${gport}`;
   const gstatus = async () => (await (await fetch(`${gbase}/api/git/status`)).json());
@@ -1092,13 +1093,13 @@ step('git: fetch makes status().behind real; timer only with a remote, cleared b
   // No remote: no timer.
   const lone = path.join(g, 'lone');
   fs.mkdirSync(lone); sh(lone, 'init', '-q'); fs.writeFileSync(path.join(lone, 'main.tex'), 'x\n'); sh(lone, 'add', '-A'); sh(lone, 'commit', '-qm', 'i');
-  const srv2 = await startServer({ root: lone, port: gport + 1 });
+  const srv2 = await startServer({ root: lone, port: await freePort() });
   assert.equal(srv2.gitTimerActive(), false, 'no remote: no timer');
   await srv2.close();
   // Not a git repo: no timer either.
   const plain = path.join(g, 'plain');
   fs.mkdirSync(plain); fs.writeFileSync(path.join(plain, 'main.tex'), 'x\n');
-  const srv3 = await startServer({ root: plain, port: gport + 2 });
+  const srv3 = await startServer({ root: plain, port: await freePort() });
   assert.equal(srv3.gitTimerActive(), false, 'not a repo: no timer');
   await srv3.close();
   fs.rmSync(g, { recursive: true, force: true });
@@ -1385,7 +1386,7 @@ const chg = {};
   fs.cpSync(new URL('../examples/sample-paper', import.meta.url), mine, { recursive: true });
   sh(mine, 'add', '-A'); sh(mine, 'commit', '-qm', 'init'); sh(mine, 'push', '-q', '-u', 'origin', 'HEAD:master');
   sh(g, 'clone', '-q', bare, theirs);
-  const cport = 46000 + Math.floor(Math.random() * 1500);
+  const cport = await freePort();
   const csrv = await startServer({ root: mine, port: cport });
   const cbase = `http://127.0.0.1:${cport}`;
   const get = async (p) => { const r = await fetch(`${cbase}/api${p}`); return { status: r.status, body: await r.json() }; };
@@ -1460,7 +1461,7 @@ const chg = {};
   fs.cpSync(new URL('../examples/sample-paper', import.meta.url), lone, { recursive: true });
   sh(lone, 'init', '-q'); sh(lone, 'add', '-A'); sh(lone, 'commit', '-qm', 'one');
   fs.appendFileSync(path.join(lone, 'main.tex'), '\n% local only\n');
-  const lport = cport + 1;
+  const lport = await freePort();
   const lsrv = await startServer({ root: lone, port: lport });
   const lc = await (await fetch(`http://127.0.0.1:${lport}/api/changes?since=sync`)).json();
   assert.equal(lc.tracking, false); assert.equal(lc.kind, 'head', 'no upstream: compared with HEAD');

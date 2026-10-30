@@ -7,6 +7,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { startServer } from '../../server/app.js';
+import { freePort } from '../free-port.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const sh = (cwd, ...a) => execFileSync('git', ['-c', 'user.name=test', '-c', 'user.email=test@example.org', ...a], { cwd, stdio: 'pipe' }).toString();
@@ -21,7 +22,7 @@ const test = base.extend({
     fs.cpSync(path.join(here, '..', '..', 'examples', 'sample-paper'), mine, { recursive: true });
     sh(mine, 'add', '-A'); sh(mine, 'commit', '-qm', 'init'); sh(mine, 'push', '-q', '-u', 'origin', 'HEAD:master');
     sh(tmp, 'clone', '-q', bare, theirs);
-    const port = 47000 + Math.floor(Math.random() * 2000);
+    const port = await freePort();
     const running = await startServer({ root: mine, port });
     await use({ baseURL: `http://127.0.0.1:${port}`, running, mine, theirs });
     await running.close();

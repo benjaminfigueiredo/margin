@@ -8,6 +8,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { startHub } from '../../server/hub.js';
+import { freePort } from '../free-port.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 test.describe.configure({ mode: 'serial' });
@@ -23,7 +24,7 @@ function makePaper(name) {
 
 test.beforeAll(async () => {
   tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'margin-hub-ui-')));
-  const port = 46000 + Math.floor(Math.random() * 1500) * 2;
+  const port = await freePort(); // papers get the next free ports above it
   hub = await startHub({ port, configDir: path.join(tmp, 'config'), firstPaperPort: port + 1, platform: 'linux' });
   a = await hub.addPaper(makePaper('alpha-paper'));
   b = await hub.addPaper(makePaper('beta-paper'));
