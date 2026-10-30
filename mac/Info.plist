@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Margin.app's Info.plist. mac/build-app.sh copies it into the bundle and sets the two version
+     strings from package.json. -->
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleDisplayName</key>
+	<string>Margin</string>
+	<key>CFBundleExecutable</key>
+	<string>Margin</string>
+	<key>CFBundleIconFile</key>
+	<string>Margin</string>
+	<key>CFBundleIdentifier</key>
+	<string>io.github.benjaminfigueiredo.margin</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>Margin</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.0.0</string>
+	<key>CFBundleVersion</key>
+	<string>0.0.0</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>13.0</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.productivity</string>
+	<key>NSHumanReadableCopyright</key>
+	<string>© 2026 Benjamin Garcia de Figueiredo. MIT License.</string>
+	<key>NSPrincipalClass</key>
+	<string>NSApplication</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSSupportsAutomaticGraphicsSwitching</key>
+	<true/>
+	<!-- The hub's "Claude terminal" button runs osascript to tell Terminal to open the paper folder
+	     and run claude. osascript is a child of this app, so macOS asks on Margin's behalf; without
+	     this string the request fails silently. -->
+	<key>NSAppleEventsUsageDescription</key>
+	<string>Margin asks Terminal to open a paper's folder and run Claude Code there (the Claude terminal button).</string>
+	<!-- Everything Margin shows comes from its own servers on 127.0.0.1 over plain http. -->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+	<!-- Folders can be opened with Margin (Finder's Open With, or a folder dropped on the Dock
+	     icon). Alternate: Margin never becomes the default app for folders. -->
+	<key>CFBundleDocumentTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Paper folder</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>public.folder</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>

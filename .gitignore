@@ -4,3 +4,7 @@ test-results/
 playwright-report/
 .playwright/
 test-output.txt
+
+# Mac app (mac/build-app.sh)
+mac/.build/
+mac/dist/
