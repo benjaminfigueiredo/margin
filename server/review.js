@@ -92,6 +92,11 @@ export class VersionedJsonFile {
   }
 }
 
+// .review/archive.json: closed items that "clear closed" removed from review.json. Same
+// protections as the other two files. Version 1 added the field; older files hold the same items.
+const ARCHIVE_VERSION = 1;
+const ARCHIVE_MIGRATIONS = { 0: (d) => ({ ...d, version: 1 }) };
+
 export class ReviewStore extends EventEmitter {
   constructor(project) {
     super();
@@ -99,6 +104,10 @@ export class ReviewStore extends EventEmitter {
     this.file = path.join(project.reviewDir, 'review.json');
     this.store = new VersionedJsonFile(this.file, {
       version: CURRENT_VERSION, migrations: MIGRATIONS, what: 'review',
+      check: (raw) => (Array.isArray(raw.items) ? null : 'no items array'),
+    });
+    this.archive = new VersionedJsonFile(path.join(project.reviewDir, 'archive.json'), {
+      version: ARCHIVE_VERSION, migrations: ARCHIVE_MIGRATIONS, what: 'archive',
       check: (raw) => (Array.isArray(raw.items) ? null : 'no items array'),
     });
     this.data = { version: CURRENT_VERSION, items: [] };
@@ -121,6 +130,16 @@ export class ReviewStore extends EventEmitter {
 
   // An item by its full id or by a prefix of at least MIN_ID_PREFIX characters (tools show
   // the first 8). A prefix that fits several items is refused, never guessed.
+  // The archived items, for read-only lookups (accepted-since, links from the response). Never
+  // moves or rewrites the file; an unreadable or newer-format archive reads as empty here, and
+  // clearClosed() is what refuses or quarantines it.
+  archivedItems() {
+    try {
+      const raw = JSON.parse(fs.readFileSync(this.archive.file, 'utf8'));
+      return Array.isArray(raw?.items) ? raw.items : [];
+    } catch { return []; }
+  }
+
   get(id) {
     id = String(id ?? '').trim();
     const exact = this.data.items.find((it) => it.id === id);
@@ -368,8 +387,7 @@ export class ReviewStore extends EventEmitter {
   acceptedSince(since) {
     const t = Date.parse(since);
     if (!Number.isFinite(t)) throw new Error('"since" must be a date and time, e.g. 2026-10-29T09:30:00Z');
-    let archived = [];
-    try { archived = JSON.parse(fs.readFileSync(path.join(path.dirname(this.file), 'archive.json'), 'utf8')).items || []; } catch { /* nothing archived yet */ }
+    const archived = this.archivedItems();
     const seen = new Set(this.data.items.map((it) => it.id));
     const texts = new Map();
     const textOf = (f) => { if (!texts.has(f)) { try { texts.set(f, this.project.read(f)); } catch { texts.set(f, null); } } return texts.get(f); };
@@ -392,13 +410,12 @@ export class ReviewStore extends EventEmitter {
   clearClosed() {
     const removed = this.data.items.filter((it) => it.status !== 'open');
     if (!removed.length) return 0;
-    const archive = path.join(path.dirname(this.file), 'archive.json');
-    let old = [];
-    try { old = JSON.parse(fs.readFileSync(archive, 'utf8')).items || []; } catch { /* none yet */ }
+    // load() throws for an archive from a newer Margin (nothing is removed then) and moves an
+    // unreadable one aside (keeping its bytes) before starting a new archive.
+    const loaded = this.archive.load();
+    const old = loaded ? loaded.data.items : [];
     const stamp = new Date().toISOString();
-    fs.mkdirSync(path.dirname(archive), { recursive: true });
-    fs.writeFileSync(archive + '.tmp', JSON.stringify({ items: [...old, ...removed.map((it) => ({ ...it, archivedAt: stamp }))] }, null, 2));
-    fs.renameSync(archive + '.tmp', archive);
+    this.archive.save({ version: ARCHIVE_VERSION, items: [...old, ...removed.map((it) => ({ ...it, archivedAt: stamp }))] });
     this.data.items = this.data.items.filter((it) => it.status === 'open');
     this.save();
     return removed.length;

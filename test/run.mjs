@@ -606,6 +606,41 @@ step('review store: versioning, backups, corruption');
   assert.equal(s.clearClosed(), 2);
   assert.deepEqual(s.data.items.map((i) => i.id), ['h1']);
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(d, '.review', 'archive.json'), 'utf8')).items.map((i) => i.id), ['h2', 'h3']);
+  const aj = (dir) => path.join(dir, '.review', 'archive.json');
+  assert.equal(JSON.parse(fs.readFileSync(aj(d), 'utf8')).version, 1);
+
+  // an existing unversioned archive keeps its items, is backed up, and gains a version
+  d = mk(); put(d, { version: 1, items: [item('k1', 'accepted')] });
+  const legacy = JSON.stringify({ items: [item('old1', 'accepted'), item('old2', 'rejected')] });
+  fs.writeFileSync(aj(d), legacy);
+  s = storeIn(d);
+  assert.deepEqual(s.archivedItems().map((i) => i.id), ['old1', 'old2'], 'readable before any migration');
+  s.clearClosed();
+  assert.deepEqual(JSON.parse(fs.readFileSync(aj(d), 'utf8')).items.map((i) => i.id), ['old1', 'old2', 'k1']);
+  assert.equal(JSON.parse(fs.readFileSync(aj(d), 'utf8')).version, 1);
+  assert.equal(fs.readFileSync(aj(d) + '.bak', 'utf8'), legacy, 'the unversioned file is kept as a backup');
+  assert.ok(!fs.existsSync(aj(d) + '.tmp'));
+
+  // an unreadable archive is moved aside, not overwritten; the closed items are still archived
+  d = mk(); put(d, { version: 1, items: [item('m1', 'accepted')] });
+  const junk = '{"items":[{"id":"zz';
+  fs.writeFileSync(aj(d), junk);
+  s = storeIn(d);
+  const w2 = console.warn; console.warn = () => {};
+  try { s.clearClosed(); } finally { console.warn = w2; }
+  const aside2 = fs.readdirSync(path.join(d, '.review')).filter((f) => f.startsWith('archive.json.corrupt-'));
+  assert.equal(aside2.length, 1);
+  assert.equal(fs.readFileSync(path.join(d, '.review', aside2[0]), 'utf8'), junk);
+  assert.deepEqual(JSON.parse(fs.readFileSync(aj(d), 'utf8')).items.map((i) => i.id), ['m1']);
+
+  // an archive from a newer Margin: refused, nothing removed from review.json, file untouched
+  d = mk(); put(d, { version: 1, items: [item('n1', 'accepted')] });
+  const newer = JSON.stringify({ version: 99, items: [] });
+  fs.writeFileSync(aj(d), newer);
+  s = storeIn(d);
+  assert.throws(() => s.clearClosed(), /newer version of Margin/);
+  assert.equal(s.data.items.length, 1);
+  assert.equal(fs.readFileSync(aj(d), 'utf8'), newer);
 }
 
 step('undo accept (unaccept): deletion, reverse order, edit elsewhere, duplicate text');

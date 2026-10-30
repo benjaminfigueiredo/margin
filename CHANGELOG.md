@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Fix: `.review/archive.json` (items removed by "clear closed") is now versioned, backed up
+  (`.bak`, `.bak2`, `.bak3`) and moved aside if unreadable, like review.json and responses.json.
+  Existing archives keep their items.
 - Security: Claude's `read_file` and the editor's file and raw routes could read inside the private
   folders (`.review/` with the review history and referee reports, `.git/`, `.claude/`), even
   through a symlink inside the paper. They now refuse, as writes already did.

@@ -230,11 +230,7 @@ export class ResponseStore {
 
   linkContext() {
     const items = new Map(this.review.list({ status: 'all' }).map((it) => [it.id, it]));
-    let archived = new Map();
-    try {
-      const a = JSON.parse(fs.readFileSync(path.join(path.dirname(this.review.file), 'archive.json'), 'utf8')).items || [];
-      archived = new Map(a.map((it) => [it.id, it]));
-    } catch { /* nothing archived yet */ }
+    const archived = new Map(this.review.archivedItems().map((it) => [it.id, it]));
     const texts = new Map();
     const textOf = (f) => {
       if (!texts.has(f)) { try { texts.set(f, this.review.project.read(f)); } catch { texts.set(f, null); } }
