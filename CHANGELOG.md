@@ -196,6 +196,9 @@ and privacy fixes.
 
 ### Other fixes
 
+- Fix: stopping a paper (from the hub, or quitting the Mac app) while it was compiling left LaTeX
+  writing into `.margin-build/` after the server had stopped. Stopping now waits for a compile or
+  diff PDF in progress to finish.
 - Fix: a file dropped on a part of the window that takes no files (the PDF, the top bar) made the
   browser show that file instead of Margin. Only the file tree, the editor and the Context view
   take drops now; elsewhere the drop is refused.

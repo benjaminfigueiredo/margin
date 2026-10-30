@@ -2294,6 +2294,30 @@ step('latexdiff: clear message when missing; marked-up PDF built beside, never o
   fs.rmSync(chg.g, { recursive: true, force: true });
 }
 
+step('close() waits for a compile in progress');
+{
+  // Nothing may write into the paper folder after close() returns: the hub stops papers this way,
+  // and tests delete the folder right after (the WebKit CI job failed with ENOTEMPTY on .margin-build
+  // while latexmk was still writing).
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'margin-close-'));
+  const paper = path.join(d, 'paper');
+  fs.cpSync(new URL('../examples/sample-paper', import.meta.url), paper, { recursive: true });
+  const port = await freePort();
+  const srv = await startServer({ root: paper, port });
+  const compiling = fetch(`http://127.0.0.1:${port}/api/compile`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(() => null);
+  const build = path.join(paper, '.margin-build');
+  // wait until latexmk has started writing, then close mid-compile
+  for (let i = 0; i < 100 && !(fs.existsSync(build) && fs.readdirSync(build).length); i++) await new Promise((r) => setTimeout(r, 50));
+  await srv.close();
+  const snapshot = () => fs.readdirSync(build).map((f) => { const st = fs.statSync(path.join(build, f)); return `${f}:${st.size}:${st.mtimeMs}`; }).sort().join('\n');
+  const before = snapshot();
+  await new Promise((r) => setTimeout(r, 1500));
+  assert.equal(snapshot(), before, 'files in .margin-build changed after close() returned');
+  await compiling;
+  fs.rmSync(d, { recursive: true, force: true });
+  console.log('nothing written after close()');
+}
+
 console.log('\nAll checks passed.');
 await client.close();
 if (running) { await running.close(); fs.rmSync(tmp, { recursive: true, force: true }); }

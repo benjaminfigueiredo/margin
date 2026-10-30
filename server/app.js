@@ -386,7 +386,13 @@ export async function startServer({ root, port = 4242, main, engine, configDir, 
 
   // 127.0.0.1, and ::1 as well when the machine has IPv6 (macOS may resolve localhost to it first).
   const { server, server6 } = await listenLoopback(app, port, { onUpgrade });
-  return { server, project, review, gitPoll, gitTimerActive: () => gitTimer !== null, close: async () => { clearInterval(gitTimer); claude.close(); claudeEvents.close(); gitTimer = null; await watcher.close(); wss.close(); server.close(); server6.close(); } };
+  return { server, project, review, gitPoll, gitTimerActive: () => gitTimer !== null, close: async () => {
+    clearInterval(gitTimer); clearTimeout(autoTimer); claude.close(); claudeEvents.close(); gitTimer = null;
+    // Let a compile or a diff PDF in progress finish, so nothing writes into the paper folder after
+    // close() returns (the hub stops papers this way; tests delete the folder right after).
+    await Promise.all([state.compiling, state.diffing].map((p) => Promise.resolve(p).catch(() => {})));
+    await watcher.close(); wss.close(); server.close(); server6.close();
+  } };
 }
 
 // Content-Disposition for a file the browser shows itself but should save under `name`.
