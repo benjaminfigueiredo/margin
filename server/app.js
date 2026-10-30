@@ -180,6 +180,8 @@ export async function startServer({ root, port = 4242, main, engine, configDir, 
 
   api.post('/compile', handle(async () => summarize(await runCompile('you'))));
   api.get('/compile/log', handle(async () => ({ log: state.lastCompile?.log || '' })));
+  // The same log as a page of its own, for the "Raw log" link (opens in a new tab or window).
+  api.get('/compile/log.txt', (req, res) => { res.set('Cache-Control', 'no-store'); res.type('text/plain; charset=utf-8').send(state.lastCompile?.log || 'No compile yet.\n'); });
   api.get('/synctex/forward', handle(async (req) => forwardSearch(project, String(req.query.file), Number(req.query.line), Number(req.query.column || 0))));
   api.get('/synctex/inverse', handle(async (req) => inverseSearch(project, Number(req.query.page), Number(req.query.x), Number(req.query.y))));
 

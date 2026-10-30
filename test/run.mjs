@@ -85,6 +85,10 @@ assert.match(r.text, /sec:result/);
   assert.equal(res.status, 200);
   assert.equal(res.headers.get('content-disposition'), 'inline; filename="main.pdf"');
   assert.equal(res.headers.get('content-type'), 'application/pdf');
+  const log = await fetch(`${base}/api/compile/log.txt`);
+  assert.equal(log.status, 200);
+  assert.match(log.headers.get('content-type'), /^text\/plain/);
+  assert.match(await log.text(), /This is \w*TeX/, 'the raw log is served as a page of its own');
 }
 
 step('check_citations');

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Fix: **Raw log** could be blocked as a popup in Safari. It is now a plain link to the log as a
+  text page, which opens in a new tab (a new window in the Mac app, as other links do).
 - Fix: Download PDF saved the file as "pdf" in Safari and the Mac app. It is now named after the
   main document (`main.pdf`); the viewer still shows the PDF inline.
 - Fix: when the paper folder is a subfolder of its git repository, the Sync confirmation, the

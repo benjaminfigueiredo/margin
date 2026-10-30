@@ -454,11 +454,8 @@ function showLogs(on) {
 $('#btn-compile').addEventListener('click', compile);
 $('#btn-logs').addEventListener('click', () => showLogs());
 $('#logs .close').addEventListener('click', () => showLogs(false));
-$('#btn-rawlog').addEventListener('click', async () => {
-  const { log } = await api('/compile/log');
-  const w = window.open('', '_blank');
-  if (w) { w.document.title = 'LaTeX log'; const pre = w.document.createElement('pre'); pre.textContent = log; w.document.body.append(pre); }
-});
+// The raw log is a plain link to a text page (#btn-rawlog in index.html): opening a window after an
+// await is no longer a user gesture, and Safari blocks it as a popup.
 
 // Compile settings popover
 $('#btn-compile-menu').addEventListener('click', (e) => { e.stopPropagation(); $('#compile-menu').classList.toggle('hidden'); });

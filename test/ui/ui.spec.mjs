@@ -53,6 +53,11 @@ test('compile: log badge shows the sample paper counts, a row opens file:line', 
   await expect(badge).toHaveClass(/warn/);
   await page.locator('#btn-logs').click();
   await expect(page.locator('#log-list h4', { hasText: `Warnings (${EXPECTED_WARNINGS})` })).toBeVisible();
+  // The raw log is a plain link, opened synchronously by the click (Safari blocks a window opened after an await)
+  const [raw] = await Promise.all([page.waitForEvent('popup'), page.locator('#btn-rawlog').click()]);
+  await raw.waitForLoadState();
+  await expect(raw.locator('body')).toContainText('This is');
+  await raw.close();
   const row = page.locator('#log-list .log-item.warn', { has: page.locator('.log-loc') }).first();
   const loc = (await row.locator('.log-loc').textContent()).trim();
   const [file, line] = loc.split(':');
