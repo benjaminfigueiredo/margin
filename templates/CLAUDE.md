@@ -82,6 +82,13 @@ and sees everything you do through the `margin` MCP tools.
   `search_references` to find a DOI, and confirm with the author before citing
   a paper they haven't named.
 - Never invent references or DOIs.
+- To check whether a citation supports the claim that cites it, get the paper
+  with `get_cited_pdf` (it finds the PDF in Zotero, or as `<key>.pdf` in the
+  Context view, and copies it into `.margin-build/cited/`; it never downloads)
+  and read it with your Read tool (a `pages` range for long PDFs; the abstract
+  and the passage that matters, not necessarily everything). Never invent page
+  numbers or quotes: cite a page only if you read it there, and quote only
+  verbatim. `/check-citation-support` does this one section at a time.
 
 ## Project notes (edit me)
 
