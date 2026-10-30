@@ -63,7 +63,7 @@ jobs:
         run: |
           enc() { sed 's/%/%25/g; s/\r//g' | awk 'BEGIN{ORS="%0A"} {print}'; }
           if [ "$BUILD" = failure ] && [ -s build-output.txt ]; then
-            errors="$(grep -E '(error|fatal error):' build-output.txt | cut -c1-400 | awk '!seen[$0]++' | head -n 40 || true)"
+            errors="$(grep -E '(error|fatal error):' build-output.txt | sed "s|$GITHUB_WORKSPACE/||g" | cut -c1-400 | awk '!seen[$0]++' | head -n 40 || true)"
             if [ -n "$errors" ]; then echo "::error title=Swift build errors::$(printf '%s\n' "$errors" | enc)"; fi
           fi
           for step in build check smoke; do
@@ -115,7 +115,7 @@ jobs:
           set -o pipefail
           specs=""
           if [ "$TEX" != success ]; then
-            specs="$(grep -L -E 'compile|pdf' test/ui/*.spec.mjs | tr '\n' ' ')"
+            specs="$(grep -L -E 'compile|pdf' test/ui/*.spec.mjs | tr '\n' ' ' || true)"
             echo "::warning title=WebKit UI tests without TeX::TeX could not be installed, so only the specs that never compile ran: $specs"
           fi
           # shellcheck disable=SC2086
