@@ -405,12 +405,12 @@ step('SIGTERM to margin hub stops its papers; bare `margin` picks paper or hub b
 step('margin hub --exit-with-stdin: the hub and its papers stop when the starting program goes away');
 {
   const cfg5 = path.join(tmp, 'config-stdin');
-  const port5 = rand() + 1;
+  const port5 = await freePort();
   const paperPort = port5 + 1;
   fs.mkdirSync(cfg5, { recursive: true });
   fs.writeFileSync(path.join(cfg5, 'projects.json'), JSON.stringify({ version: 1, projects: [{ id: a.id, path: paperA, name: 'paper-a', port: paperPort, addedAt: new Date().toISOString(), lastOpened: null }] }));
   // Only the hub takes it: a paper server refuses it rather than ignoring it.
-  const bad = spawn(process.execPath, [BIN, paperB, '--no-open', '--exit-with-stdin', '--port', String(rand() + 1)], { env: { ...process.env, MARGIN_CONFIG_DIR: cfg5 }, stdio: ['ignore', 'pipe', 'pipe'] });
+  const bad = spawn(process.execPath, [BIN, paperB, '--no-open', '--exit-with-stdin', '--port', String(await freePort())], { env: { ...process.env, MARGIN_CONFIG_DIR: cfg5 }, stdio: ['ignore', 'pipe', 'pipe'] });
   let badErr = ''; bad.stderr.on('data', (d) => { badErr += d; });
   assert.equal(await new Promise((ok) => bad.on('exit', ok)), 1);
   assert.match(badErr, /--exit-with-stdin is an option of margin hub only/);
