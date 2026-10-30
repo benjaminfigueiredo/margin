@@ -102,13 +102,13 @@ final class WindowManager {
         return list
     }
 
-    /// Before quitting: let every editor save what it has not saved yet.
-    func flushEdits() async {
-        var any = false
+    /// Before quitting: every editor saves what it has not saved yet; returns what is still unsaved.
+    func saveAndReportUnsaved() async -> [String] {
+        var problems: [String] = []
         for c in paperWindows {
-            if await c.flushEdits() { any = true }
+            if let p = await c.saveAndReportUnsaved() { problems.append(p) }
         }
-        if any { try? await Task.sleep(nanoseconds: 1_000_000_000) }
+        return problems
     }
 
     func closed(_ c: BrowserWindowController) {

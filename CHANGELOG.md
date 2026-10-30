@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Mac app: closing a paper window or quitting saves the editor first and, if edits still cannot be
+  saved (they conflict with a change on disk), asks before closing instead of discarding them.
 - Fix: `margin init` in a git repository without an `origin` remote printed git's "error: No such
   remote 'origin'" on top of its own message. Only its own message is shown now.
 - Fix: **Raw log** could be blocked as a popup in Safari. It is now a plain link to the log as a

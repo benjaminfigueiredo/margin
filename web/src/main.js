@@ -846,11 +846,20 @@ async function boot() {
   }
 }
 
-// Leaving with unsaved edits: save now and ask the browser to confirm (the Mac app sends this event
-// itself before it closes a window, and waits a moment when it is cancelled).
+// Leaving with unsaved edits: save now and ask the browser to confirm. (The Mac app does not rely on
+// this: it calls window.marginBeforeClose, below, before it closes a paper window or quits.)
 window.addEventListener('beforeunload', (e) => { if (state.dirty) { save(); e.preventDefault(); } });
 // Hidden (another tab, minimised, the screen locked): save now rather than in 0.7 s, in case the page
 // is never shown again. pagehide: last chance, and it may come without beforeunload.
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') save(); });
 window.addEventListener('pagehide', () => saveOnExit());
+// The Mac app calls this before it closes a paper window or quits: save now, then say what is still
+// unsaved ('' when nothing is), so it can ask instead of closing over edits it cannot save.
+window.marginBeforeClose = async () => {
+  try { await save(); } catch { /* the editor reports it */ }
+  if (!state.dirty || !state.file) return '';
+  return state.conflict
+    ? `Your edits to ${state.file} conflict with a change on disk and are not saved.`
+    : `Your edits to ${state.file} could not be saved.`;
+};
 boot().catch((e) => toast(`Failed to start: ${e.message}`, 'error', 20000));

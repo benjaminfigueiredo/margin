@@ -27,6 +27,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, WKUID
     private let zoomKey: String?
     private var failedURL: URL?
     private var closingAfterFlush = false
+    private var checkingClose = false
 
     init(kind: Kind, configuration: WKWebViewConfiguration, manager: WindowManager, frameKey: String?, size: NSSize) {
         self.kind = kind
@@ -91,14 +92,24 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, WKUID
         return value
     }
 
-    /// The editor saves 0.7 s after the last keystroke, and its beforeunload handler saves at once
-    /// when there is something unsaved (and cancels the event). A web view that is closed or whose
-    /// server stops gets no beforeunload, so fire it before closing a paper window or quitting.
-    /// Returns true if there was something to save.
-    func flushEdits() async -> Bool {
-        guard kind == .paper else { return false }
-        let js = "(() => { const e = new Event('beforeunload', { cancelable: true }); window.dispatchEvent(e); return String(e.defaultPrevented); })()"
-        return await evaluate(js, timeout: 2) == "true"
+    /// Before closing a paper window or quitting: the page saves what it has not saved yet and says
+    /// what is still unsaved (an edit that conflicts with a change on disk, a save that failed).
+    /// Returns nil when nothing is at risk, or when the page cannot be asked (then closing loses
+    /// nothing the editor knew how to save).
+    func saveAndReportUnsaved() async -> String? {
+        guard kind == .paper else { return nil }
+        let answer = OneShot<String?>()
+        webView.callAsyncJavaScript("return window.marginBeforeClose ? await window.marginBeforeClose() : ''", arguments: [:], in: nil, in: .page) { result in
+            if case .success(let value) = result { answer.fulfill(value as? String) } else { answer.fulfill(nil) }
+        }
+        let timer = Task {
+            try? await Task.sleep(nanoseconds: 5_000_000_000)
+            answer.fulfill(nil)
+        }
+        let value = await answer.wait()
+        timer.cancel()
+        guard let value, !value.isEmpty else { return nil }
+        return value
     }
 
     // MARK: - menu actions (View menu; reach the key window's controller through the responder chain)
@@ -121,12 +132,16 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, WKUID
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {
         guard kind == .paper, !closingAfterFlush else { return true }
-        closingAfterFlush = true
+        if checkingClose { return false } // a second click while the page is saving
+        checkingClose = true
         Task {
-            if await self.flushEdits() {
-                sender.orderOut(nil)
-                try? await Task.sleep(nanoseconds: 1_000_000_000) // the save is a local request: plenty
+            let problem = await self.saveAndReportUnsaved()
+            self.checkingClose = false
+            if let problem {
+                let answer = Alerts.show("Close without saving?", "\(problem)\n\nKeep the window open to resolve it in the bar above the editor, or close it and lose those edits.", buttons: ["Keep Window Open", "Close Anyway"])
+                if answer == .alertFirstButtonReturn { return }
             }
+            self.closingAfterFlush = true
             sender.close()
         }
         return false

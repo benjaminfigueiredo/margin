@@ -15,6 +15,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var pendingFolders: [URL] = [] // opened from Finder before the hub was ready
     private var terminating = false
     private var replied = false
+    private var quitWatchdog: Timer?
 
     override init() {
         let env = ProcessInfo.processInfo.environment
@@ -190,17 +191,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if terminating { return .terminateCancel } // a second ⌘Q while the first is under way
         guard hub.ownsRunningHub || !windows.paperWindows.isEmpty else { return .terminateNow }
         terminating = true
+        armQuitWatchdog()
         Task {
-            await self.windows.flushEdits()
+            let problems = await self.windows.saveAndReportUnsaved()
+            if !problems.isEmpty {
+                // Asking can take as long as the author likes: no watchdog while the alert is up.
+                self.quitWatchdog?.invalidate()
+                let answer = Alerts.show("Quit without saving?", problems.joined(separator: "\n") + "\n\nCancel to resolve it in the bar above the editor, or quit and lose those edits.", buttons: ["Cancel", "Quit Anyway"])
+                if answer == .alertFirstButtonReturn {
+                    self.terminating = false
+                    NSApp.reply(toApplicationShouldTerminate: false)
+                    return
+                }
+                self.armQuitWatchdog()
+            }
             await self.hub.stop()
             self.replyTerminate()
         }
-        // Never hang on the way out, whatever happens above. A run-loop timer in the common modes,
-        // not a Task: while AppKit waits for our reply it spins the run loop in the modal-panel mode,
-        // and this must fire even if the tasks above cannot run.
-        let watchdog = Timer(timeInterval: 15, target: self, selector: #selector(quitWatchdogFired), userInfo: nil, repeats: false)
-        RunLoop.main.add(watchdog, forMode: .common)
         return .terminateLater
+    }
+
+    /// Never hang on the way out, whatever happens in the quit task. A run-loop timer in the common
+    /// modes, not a Task: while AppKit waits for our reply it spins the run loop in the modal-panel
+    /// mode, and this must fire even if the quit task cannot run.
+    private func armQuitWatchdog() {
+        quitWatchdog?.invalidate()
+        let t = Timer(timeInterval: 15, target: self, selector: #selector(quitWatchdogFired), userInfo: nil, repeats: false)
+        RunLoop.main.add(t, forMode: .common)
+        quitWatchdog = t
     }
 
     @objc private func quitWatchdogFired() { replyTerminate() }

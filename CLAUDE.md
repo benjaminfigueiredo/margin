@@ -95,6 +95,8 @@ The test needs latexmk, bibtex and synctex on PATH.
 - WKWebView shows no `alert`/`confirm`/`prompt`, downloads nothing and opens no windows by itself:
   `mac/Sources/Margin/BrowserWindow.swift` does. A UI change that relies on another browser feature
   (a file `<input>`, `window.open`, a `download` link, a new ⌘ shortcut) must be checked there.
+- The Mac app calls `window.marginBeforeClose()` (web/src/main.js) before closing a paper window or
+  quitting, and asks the author when it reports unsaved edits. Keep that function and its contract.
 - `res.sendFile` with an absolute path refuses any dot-folder in it (Margin itself may live in
   one, e.g. a `.claude/worktrees/` checkout): pass `{ root }` and a relative name.
 - Node's global HTTP agent keeps connections alive: a test that restarts a server on the same
