@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- **Private context for Claude.** A new **Context** view in the review panel keeps your own
+  background for a paper (discussions, notes from calls, drafts, slides as `.md`, `.txt` or
+  `.pdf`): drop files on it, use **Add files…**, or type or paste a note; give each a description;
+  open, delete or show it in the Finder. The files stay in `.review/context/` on your computer,
+  never in git or on Overleaf. Claude reads them with the new `list_context` and `read_context`
+  tools (PDFs with its own Read tool), is told never to cite or copy them, and can keep a
+  discussion you paste in the terminal with `save_context_note`. `get_editor_state` mentions how
+  many items there are. Papers set up before this keep their `.claude/CLAUDE.md`; the tools carry
+  the rules themselves.
+- Fix: a file dropped on a part of the window that takes no files (the PDF, the top bar) made the
+  browser show that file instead of Margin. Only the file tree, the editor and the Context view
+  take drops now; elsewhere the drop is refused.
+- The review panel's **This file | All** switch moved to the row below the view switch, so
+  Review, Response and Context fit in a split-screen window.
+
 - Mac app: closing a paper window or quitting saves the editor first and, if edits still cannot be
   saved (they conflict with a change on disk), asks before closing instead of discarding them.
 - Fix: `margin init` in a git repository without an `origin` remote printed git's "error: No such

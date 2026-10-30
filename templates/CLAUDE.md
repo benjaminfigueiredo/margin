@@ -57,6 +57,21 @@ and sees everything you do through the `margin` MCP tools.
   manuscript. Fix the reply or propose a new suggestion.
 - `/respond-to-reviewers` runs this workflow.
 
+## The author's private context
+
+- The author may keep background for this paper in Margin's Context view:
+  discussions with co-authors, notes from calls, earlier drafts, slides
+  (`.md`, `.txt`, `.pdf` in `.review/context/`, local only). `get_editor_state`
+  says how many items there are. Check `list_context` before a review or a
+  rewrite; read text items with `read_context` and PDFs with your Read tool on
+  the path it gives.
+- Use it to understand the author's intent and constraints. Never cite it, never
+  copy it into the manuscript or the bibliography, and never write it anywhere
+  that reaches git or Overleaf.
+- When the author pastes a discussion into the terminal and asks you to keep it,
+  save it with `save_context_note`. Don't save anything there they didn't ask
+  for.
+
 ## Bibliography
 
 - Use `check_citations` to find missing, unused and duplicate entries.

@@ -19,6 +19,9 @@ server/mcp.js       MCP tool definitions (what Claude can do in a paper session)
 server/review.js    Suggestion/comment store (.review/review.json) and quote-based anchoring
 server/responses.js Referee reports and the point-by-point response (.review/responses.json), owned by ReviewStore
 server/responses-mcp.js  MCP tools for the response (get_response, update_response)
+server/context.js   Private context (.review/context/ files, .review/context.json descriptions): own narrow path checks
+                    (plain names, regular files, no links, O_EXCL creates), its REST routes and the /context/file page
+server/context-mcp.js  MCP tools for the context (list_context, read_context, save_context_note)
 server/asks.js      "Ask Claude" requests: state, delivery to the prompt hook, Claude activity
 server/search.js    Project-wide find and replace
 server/wordcount.js LaTeX word counter (also bundled into the browser)
@@ -31,7 +34,8 @@ server/latexdiff.js latexdiff --flatten between a git ref and the paper, compile
 server/project.js   Path safety (all client paths go through Project.abs), file tree, create/rename/delete/upload
 server/init.js      `margin init`: .mcp.json, .claude/ files, .git/info/exclude
 templates/          CLAUDE.md, slash commands and the prompt hook that `margin init` copies into a paper
-web/                UI source: CodeMirror 6 editor, pdf.js viewer, review panel; hub.html/hub.css/src/hub.js for the hub page
+web/                UI source: CodeMirror 6 editor, pdf.js viewer, review panel (Review | Response | Context views:
+                    web/src/review.js, response.js, context.js); hub.html/hub.css/src/hub.js for the hub page
 public/             Built UI (committed so users can run without dev dependencies)
 examples/           Sample paper used by the test
 test/run.mjs        End-to-end API test

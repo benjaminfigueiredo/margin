@@ -348,7 +348,7 @@ the hand-over happens when you send a message, through a Claude Code hook that
 
 | Tool | |
 |---|---|
-| `get_editor_state` | Open file, cursor line, selected text |
+| `get_editor_state` | Open file, cursor line, selected text; how many private context items there are |
 | `suggest_edit`, `suggest_edits` | Tracked-change suggestions (file untouched until you accept); `responds_to` links one to a referee point |
 | `revise_suggestion` | Change a suggestion after your feedback |
 | `add_comment`, `reply`, `resolve` | Comment threads |
@@ -362,6 +362,9 @@ the hand-over happens when you send a message, through a Claude Code hook that
 | `list_files`, `read_file` | Project files |
 | `get_response` | Referee reports and the point-by-point response, with each point's status (done / pending / mismatch) |
 | `update_response` | Split a report into points; propose stances (you confirm them) and draft replies; link suggestions |
+| `list_context` | Your private context for the paper (notes, discussions, drafts): name, type, size, description, who added it, and its path, so Claude can read a PDF with its own Read tool |
+| `read_context` | The text of a .md or .txt context item, in parts for long files (for a PDF: where to read it) |
+| `save_context_note` | Keep something you pasted in the terminal as a Markdown note in your private context |
 
 Claude Code's own file tools still work for direct edits; the editor reloads
 when a file changes on disk. If you have unsaved edits in that file, the change on
@@ -407,6 +410,30 @@ quoted with your reply under it (the .tex version treats both as plain text and
 escapes characters such as % and $). Reports and responses are stored in
 `.review/responses.json` — on your computer only, never committed or pushed to
 Overleaf — and the export is a download, not a file in the paper folder.
+
+### Private context: notes and discussions
+
+Claude reviews better when it knows what you and your co-authors have already
+decided. Switch the review panel to **Context** and give it that background:
+drop `.md`, `.txt` or `.pdf` files on the panel (or **Add files…**), or press
+**+ Note** and type or paste (an email thread, notes from a call). Click a
+file's description to say what it is; click its name to open it. Up to 20 MB
+per file.
+
+Claude sees these with `list_context` and `read_context` (PDFs with its own Read
+tool), uses them to understand what you want, and is told never to cite them or
+copy them into the paper. If you paste a discussion into the Claude terminal,
+ask Claude to keep it: `save_context_note` saves it as a note marked "added by
+Claude".
+
+The files are kept under their own names in `.review/context/` in the paper
+folder: on your computer only, never committed, never pushed to Overleaf, and
+not shown in the file tree. **Show in Finder** opens that folder; files you put
+there yourself appear in the list (without a description) when you come back to
+Margin, and files you remove there disappear from it. Only files directly in the
+folder are used: subfolders and links are skipped. Deleting from the Context
+view removes the file from disk; there is no trash. Descriptions are kept in
+`.review/context.json`.
 
 ## How it works
 
@@ -501,6 +528,7 @@ server/config.js    Margin's settings folder: shared appearance settings, atomic
 server/macos.js     macOS folder picker and Claude terminal (osascript)
 server/mcp.js       Claude's tools (MCP over HTTP at /mcp)
 server/review.js    suggestion/comment store and text anchoring
+server/context.js   private context: the author's notes in .review/context/, their descriptions
 server/asks.js      "Ask Claude": hand-over to the Claude terminal, Claude activity
 server/compile.js   latexmk, log parsing, SyncTeX
 server/bib.js       BibTeX parsing, citation checks, DOI/Crossref

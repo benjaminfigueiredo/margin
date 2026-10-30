@@ -9,7 +9,10 @@ Scope: $ARGUMENTS
 If no scope is given, call `get_editor_state` and review the selected text, or
 the section around the cursor if nothing is selected.
 
-1. Read the relevant source (and nearby sections for context).
+1. Read the relevant source (and nearby sections for context). If
+   `list_context` shows the author's private notes or discussions about this
+   part, read them first: they say what the author intends. Never cite or copy
+   them.
 2. Check `list_review` so you don't duplicate open threads.
 3. Leave feedback in Margin:
    - `suggest_edits` for concrete wording changes: clarity, concision,
