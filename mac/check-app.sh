@@ -48,7 +48,7 @@ links="$(find "$app" -type l | head -5)"
 if [[ -n "$links" ]]; then echo "note symlinks: $links"; fi
 # The server loads with the bundled dependencies alone (no dev dependencies on the path).
 check "the bundled server code loads with the bundled dependencies (import server/hub.js)" \
-  node --input-type=module -e "await import(process.argv[1])" "$res/server/hub.js"
+  node --input-type=module -e "import { pathToFileURL } from 'node:url'; await import(pathToFileURL(process.argv[1]).href)" "$res/server/hub.js"
 echo "size: $(du -sh "$app" | cut -f1)"
 
 if (( failed )); then echo "check-app.sh: some checks failed"; exit 1; fi
