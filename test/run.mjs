@@ -9,7 +9,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { startServer } from '../server/app.js';
 import { Project } from '../server/project.js';
@@ -1535,6 +1535,16 @@ step('margin init: MCP config, prompt hook, /margin command; idempotent, keeps t
   assert.equal(status.trim(), '', `init left files git would push:\n${status}`);
   assert.ok(new Project(dir).isIgnored('.claude/hooks/margin-asks.mjs'));
   fs.rmSync(dir, { recursive: true, force: true });
+
+  // A repository without an origin is an expected case that init reports itself: git's own
+  // "error: No such remote 'origin'" must not leak to the terminal on top of that.
+  const noOrigin = fs.mkdtempSync(path.join(os.tmpdir(), 'margin-init-noremote-'));
+  execFileSync('git', ['init', '-q'], { cwd: noOrigin });
+  const cli = spawnSync(process.execPath, [fileURLToPath(new URL('../bin/margin.js', import.meta.url)), 'init', noOrigin], { encoding: 'utf8' });
+  assert.equal(cli.status, 0, cli.stderr);
+  assert.match(cli.stdout, /no "origin" remote/, 'init still says there is no origin');
+  assert.equal(cli.stderr, '', `init printed to stderr: ${cli.stderr}`);
+  fs.rmSync(noOrigin, { recursive: true, force: true });
 }
 
 // Changes view (server/changes.js) and latexdiff PDF (server/latexdiff.js): a clone of a bare "Overleaf"

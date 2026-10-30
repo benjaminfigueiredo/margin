@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Fix: `margin init` in a git repository without an `origin` remote printed git's "error: No such
+  remote 'origin'" on top of its own message. Only its own message is shown now.
 - Fix: **Raw log** could be blocked as a popup in Safari. It is now a plain link to the log as a
   text page, which opens in a new tab (a new window in the Mac app, as other links do).
 - Fix: Download PDF saved the file as "pdf" in Safari and the Mac app. It is now named after the

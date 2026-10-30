@@ -26,7 +26,7 @@ export function init(dir, { port = 4242, log = console.log } = {}) {
     const added = ensureLocalOnlyExcluded(dir);
     if (added.length) done.push(`git: kept ${added.join(', ')} out of commits (.git/info/exclude)`);
     try {
-      const remote = execFileSync('git', ['remote', 'get-url', 'origin'], { cwd: dir }).toString().trim();
+      const remote = execFileSync('git', ['remote', 'get-url', 'origin'], { cwd: dir, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
       if (!/overleaf\.com/.test(remote)) skipped.push(`origin is ${remote.replace(/\/\/[^@/]+@/, '//')} (not Overleaf) — Sync will push there`);
     } catch { skipped.push('no "origin" remote — Sync will only commit locally'); }
   } else {
