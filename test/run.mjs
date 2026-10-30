@@ -1002,6 +1002,31 @@ step('editor saves carry their base: a stale one is refused (409), never written
   console.log('no base: replaces; matching base: saved; stale base: 409 and untouched; edit and after applied; missing: 409, not recreated');
 }
 
+step('merge3 (web/src/merge.js): edits in separate places merge, the same place does not');
+{
+  const { merge3, region, sameText } = await import('../web/src/merge.js');
+  const apply = (mine, c) => mine.slice(0, c.from) + c.insert + mine.slice(c.to);
+  const base = 'one two three four five';
+  const mine = 'one two three four five six'; // typed at the end
+  const theirs = 'ONE two three four five';     // accepted at the start
+  assert.equal(apply(mine, merge3(base, mine, theirs)), 'ONE two three four five six');
+  assert.equal(apply('zero one two three four five', merge3(base, 'zero one two three four five', 'one two three four FIVE')), 'zero one two three four FIVE');
+  assert.equal(merge3(base, 'one two three four five!', 'one two three four five?'), null, 'both appended at the same point');
+  assert.equal(merge3(base, 'one TWO three four five', 'one too three four five'), null, 'both changed the same word');
+  assert.equal(merge3(base, 'one twoX three four five', 'one twothree four five'), null, 'touching edits are not merged');
+  assert.equal(apply('one twoX three four five', merge3(base, 'one twoX three four five', 'one two Xthree four five')), 'one twoX Xthree four five', 'one untouched character between is enough');
+  assert.equal(apply(mine, merge3(base, mine, base)), mine, 'nothing new on disk');
+  assert.equal(apply(base, merge3(base, base, theirs)), theirs, 'no local edits: take theirs');
+  // CRLF on disk, LF in the editor (CodeMirror): still merges, and in editor positions.
+  const crlf = 'a\r\nb\r\nc\r\n';
+  assert.equal(apply('a\nb\nc\nd', merge3(crlf, 'a\nb\nc\nd', 'A\r\nb\r\nc\r\n')), 'A\nb\nc\nd');
+  assert.ok(sameText('a\nb', 'a\r\nb'));
+  const r1 = region('hello world', 'hello brave world');
+  assert.deepEqual(r1, { from: 6, to: 6, text: 'brave ' });
+  assert.equal('hello world'.slice(0, r1.from) + r1.text + 'hello world'.slice(r1.to), 'hello brave world');
+  console.log('separate edits merged; same or touching edits left to the author; CRLF handled');
+}
+
 // CLAUDE.md's hardest promise: nothing Margin creates may reach Overleaf. git.sync()
 // stages with `git add -A`, so this holds only if the local-only paths are in
 // .git/info/exclude. This harness never runs `margin init`, so a pass here proves the

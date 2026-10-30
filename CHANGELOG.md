@@ -24,6 +24,24 @@
 - Fix: a review item id typed as a short prefix that fits several items (accept, reject, resolve,
   reply) used to act on the first one. It is now refused with the candidates listed, and prefixes
   under 4 characters are refused.
+- Fix: the editor could put old text back over a change made on disk, or drop what you had just
+  typed. Typing in the moment between an accepted suggestion (or Undo accept, or a find-and-replace)
+  being written and the editor showing it let the autosave write the old text back, undoing it;
+  typing while the editor reloaded a file Claude or git had changed lost those keystrokes; and
+  typing while Sync ran was thrown away when it finished. Every save from the editor now says
+  which version of the file it was made from, and the server refuses one made from a version
+  that is no longer on disk instead of overwriting it. The editor then merges the change on disk
+  with your unsaved edits when they are in different places, and otherwise keeps your text and
+  asks (**Load disk version** / **Keep mine**), saving nothing until you choose. A file deleted
+  or moved outside Margin is no longer silently recreated by the autosave: the bar offers to save
+  it again. No save is sent while a pull or Sync is running.
+- Fix: edits typed just before closing the tab or window could be lost when the page went away
+  without a `beforeunload` event (as a Mac app window or another embedded web view can). The editor
+  now also saves when the page is hidden, and sends what is still unsaved in a request that outlives
+  the page, small whatever the size of the file (only the edit is sent).
+- Fix: switching files while a save failed no longer drops the unsaved edits: the editor stays on
+  the file and says so. Nothing typed while another file is loading goes into the wrong file.
+
 - Fix: in a browser that blocks site storage (some private modes, strict cookie settings) a paper
   page did not open at all. Margin keeps only conveniences there (last open file, pane widths),
   so it now carries on without them.

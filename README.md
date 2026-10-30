@@ -364,7 +364,9 @@ the hand-over happens when you send a message, through a Claude Code hook that
 | `update_response` | Split a report into points; propose stances (you confirm them) and draft replies; link suggestions |
 
 Claude Code's own file tools still work for direct edits; the editor reloads
-when a file changes on disk.
+when a file changes on disk. If you have unsaved edits in that file, the change on
+disk is merged into them when it is elsewhere in the file; when both touch the same
+text, the editor keeps yours, saves nothing, and asks which version to keep.
 
 ### Zotero
 

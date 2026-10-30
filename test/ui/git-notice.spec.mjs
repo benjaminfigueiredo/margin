@@ -51,6 +51,38 @@ test('banner names the open file when a co-author changed it; Pull brings it int
   await expect(page.locator('#git-status')).not.toContainText('to pull');
 });
 
+// The pull rewrites the open file while the author types: the typing must not put the pre-pull text
+// back over the co-author's change (which the next Sync would then push as a revert).
+test('typing while a pull runs keeps both the pulled change and the typing', async ({ page, remote }) => {
+  await page.goto(remote.baseURL + '/');
+  await expect(page.locator('#current-file')).toHaveText('main.tex');
+  await expect(page.locator('#conn')).toHaveClass(/\bon\b/);
+  const f = path.join(remote.theirs, 'main.tex');
+  fs.writeFileSync(f, fs.readFileSync(f, 'utf8').replace('\\date{}', '\\date{2026}'));
+  sh(remote.theirs, 'commit', '-qam', 'co-author date'); sh(remote.theirs, 'push', '-q');
+  await remote.running.gitPoll();
+  const banner = page.locator('#banner');
+  await expect(banner).toContainText('main.tex was changed on Overleaf');
+
+  // Typed as the pull starts; the pull rewrites the file; the autosave delay passes; then the page
+  // hears back from the pull.
+  await page.route('**/api/git/pull', async (route) => {
+    await page.locator('#editor .cm-content').focus();
+    await page.keyboard.press('ControlOrMeta+End');
+    await page.keyboard.type('\n% typed-during-pull');
+    const response = await route.fetch();
+    await page.waitForTimeout(1000);
+    await route.fulfill({ response });
+  });
+  await banner.getByRole('button', { name: 'Pull from Overleaf' }).click();
+  const disk = () => fs.readFileSync(path.join(remote.mine, 'main.tex'), 'utf8');
+  await expect.poll(disk).toContain('% typed-during-pull');
+  await expect.poll(disk).toContain('\\date{2026}');
+  await expect(page.locator('#save-state')).toHaveText('Saved');
+  await expect(page.locator('#editor .cm-content')).toContainText('\\date{2026}');
+  await expect(page.locator('#banner')).toBeHidden();
+});
+
 test('a commit to a different file gets the generic notice, which can be dismissed', async ({ page, remote }) => {
   await page.goto(remote.baseURL + '/');
   await expect(page.locator('#current-file')).toHaveText('main.tex');

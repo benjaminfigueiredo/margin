@@ -14,8 +14,8 @@ export function createReviewPanel(root, { getCurrentFile, onFocus, onChanged, sa
 
   // Flush pending editor edits before any review action. Accept and Undo rewrite the
   // source file, so without this the server applies the change to a version of the file
-  // that is missing the author's unsaved edits, and the "changed on disk" banner's
-  // "Keep mine" writes the stale buffer back over the applied change.
+  // that is missing the author's unsaved edits. (saveIfDirty refuses while the editor has
+  // edits it cannot save; edits typed during the request are merged by web/src/main.js.)
   async function act(fn, okMsg) {
     try { await saveIfDirty?.(); await fn(); if (okMsg) toast(okMsg, 'ok', 1800); await onChanged(); }
     catch (e) { toast(e.message, 'error', 6000); }

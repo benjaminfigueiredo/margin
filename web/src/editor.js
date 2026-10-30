@@ -180,6 +180,10 @@ export function createEditor(parent, { onChange, onSelection, onReviewClick, key
       while (endA > start && endB > start && cur[endA - 1] === text[endB - 1]) { endA--; endB--; }
       view.dispatch({ changes: { from: start, to: endA, insert: text.slice(start, endB) }, annotations: external.of(true) });
     },
+    // Apply a change made elsewhere (merged into the author's unsaved edits); not reported as typing.
+    applyExternal({ from, to, insert }) {
+      view.dispatch({ changes: { from, to, insert }, annotations: external.of(true) });
+    },
     getDoc() { return view.state.doc.toString(); },
     setReview(items, active) {
       view.dispatch({ effects: [setItems.of(items), setActive.of(active ?? view.state.field(reviewField).active)] });
