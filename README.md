@@ -81,7 +81,7 @@ This adds (all local-only): `.mcp.json` (connects Claude Code to Margin),
 `.claude/settings.local.json` (approves the Margin tools so Claude doesn't ask
 each time, and adds the "Ask Claude" prompt hook), `.claude/hooks/margin-asks.mjs`
 (that hook), `.claude/CLAUDE.md` (how Claude should review — **edit the "Project
-notes" section** with your journal, spelling and terminology) and five slash
+notes" section** with your journal, spelling and terminology) and seven slash
 commands.
 
 Already set up a paper with an older Margin? Run `margin init my-paper` again: it
@@ -109,6 +109,7 @@ Things to say to Claude:
 - `/address-comments` (works through the comments you left for it)
 - `/margin` (handles what you sent with **Ask Claude**; see below)
 - `/check-citations`
+- `/check-citation-support Results` (does each cited paper support the sentence that cites it? Reads the cited PDFs from Zotero or your Context view, one section at a time; see [Zotero](#zotero))
 - `/fix-compile`
 - `/respond-to-reviewers` (after pasting a referee report in the Response view; see below)
 - "Look at my selection — is this claim supported by the results section?"
@@ -394,6 +395,7 @@ nothing, and do nothing when Margin isn't running.
 | `check_citations` | Missing / unused / duplicate keys and DOIs |
 | `search_references`, `add_bib_entry` | Crossref search; add BibTeX by DOI (deduplicated) |
 | `search_zotero`, `cite_from_zotero` | Search your Zotero library; copy one entry into the .bib by its citation key |
+| `get_cited_pdf` | Find the PDF of a cited paper (an attachment in your Zotero, or `<key>.pdf` in your Context view; never from the internet) and copy it to `.margin-build/cited/<key>.pdf` so Claude can read it with its own Read tool and check what it supports |
 | `list_files`, `read_file` | Project files |
 | `get_response` | Referee reports and the point-by-point response, with each point's status (done / pending / mismatch) |
 | `update_response` | Split a report into points; propose stances (you confirm them) and draft replies; link suggestions |
@@ -417,6 +419,29 @@ its citation keys are used, and group libraries are searched too). Without it,
 Margin falls back to Zotero's own local API (Settings → Advanced → "Allow other
 applications on this computer to communicate with Zotero"), which only covers
 My Library. Local file paths, abstracts, notes and keywords are not copied.
+
+**Checking that a citation supports its sentence.** `/check-citation-support`
+(one section at a time) asks Claude to read each cited paper and judge whether
+it supports the claim. For that, `get_cited_pdf` finds the paper's PDF, in this
+order:
+
+1. **Zotero**: a PDF attached to the item with that citation key, whether Zotero
+   stores the file or it is a linked file, in My Library or a group library.
+   (With Better BibTeX, Margin asks it for the item's attachments, `item.attachments`;
+   otherwise it uses Zotero's local API, the item's children and the attachment's
+   file.) Zotero must be open, and the file must be on this computer (Zotero
+   downloads synced files on demand: open the item once).
+2. **Your Context view**: a PDF named after the citation key, e.g.
+   `hobday2016.pdf` (any letter case). For authors without Zotero, or for a paper
+   Zotero does not have.
+
+Nothing is downloaded from the internet. The PDF found is copied to
+`.margin-build/cited/<key>.pdf` in the paper folder, which is local-only like the
+rest of `.margin-build/` (never committed, never sent to Overleaf), so that
+Claude Code can read it without asking permission for a file outside the project;
+the copy is refreshed when the original changes. Files that are not PDFs, links
+and files over 100 MB are refused. If there is no PDF, Claude is told what to do:
+attach it in Zotero, or add `<key>.pdf` in the Context view.
 
 ### Responding to referees
 
@@ -533,7 +558,7 @@ Then open `.git/info/exclude` and delete the block under
 If you had your own `.claude/` folder before running `margin init`, don't delete
 it. Instead remove only what Margin added:
 - `.claude/CLAUDE.md`
-- `.claude/commands/review.md`, `address-comments.md`, `check-citations.md`, `fix-compile.md`, `margin.md`
+- `.claude/commands/review.md`, `address-comments.md`, `check-citations.md`, `check-citation-support.md`, `fix-compile.md`, `margin.md`, `respond-to-reviewers.md`
 - `.claude/hooks/margin-asks.mjs` and `.claude/hooks/margin-events.mjs`
 - in `.claude/settings.local.json`: `"margin"` from `enabledMcpjsonServers`, `"mcp__margin__*"` from `permissions.allow`, the `UserPromptSubmit` hook that runs `margin-asks.mjs`, and the `Stop` and `Notification` hooks that run `margin-events.mjs`
 
@@ -568,7 +593,8 @@ server/asks.js      "Ask Claude": hand-over to the Claude terminal, Claude activ
 server/claude-events.js  notifications: Claude is done / needs you (Claude Code hooks), asks answered
 server/compile.js   latexmk, log parsing, SyncTeX
 server/bib.js       BibTeX parsing, citation checks, DOI/Crossref
-server/zotero.js    Zotero library search and export (Better BibTeX / local API)
+server/zotero.js    Zotero library search, export and PDF attachments (Better BibTeX / local API)
+server/cited-pdf.js `get_cited_pdf`: the PDF of a cited paper from Zotero or the context, copied to .margin-build/cited/
 server/git.js       commit / pull --rebase / push
 server/changes.js   Changes view: per-file hunks since the last sync / last commit, accepted-since list
 server/latexdiff.js latexdiff PDF of the changes, built under .margin-build/diff/

@@ -52,8 +52,8 @@ const step = (name) => console.log(`\n── ${name}`);
 step('tools/list');
 const { tools } = await client.listTools();
 console.log(tools.map((t) => t.name).join(', '));
-assert.ok(tools.length >= 22);
-for (const t of ['get_response', 'update_response', 'list_context', 'read_context', 'save_context_note']) assert.ok(tools.some((x) => x.name === t), `${t} is listed`);
+assert.ok(tools.length >= 23);
+for (const t of ['get_response', 'update_response', 'list_context', 'read_context', 'save_context_note', 'get_cited_pdf']) assert.ok(tools.some((x) => x.name === t), `${t} is listed`);
 for (const t of ['suggest_edit', 'suggest_edits']) assert.ok(tools.find((x) => x.name === t).inputSchema.properties.responds_to, `${t} takes responds_to`);
 const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 assert.equal(client.getServerVersion()?.version, pkg.version, 'the MCP server reports the package version');
@@ -279,6 +279,186 @@ if (running) {
   await zot.close();
   r = await call('search_zotero', { query: 'anything' });
   console.log(r.text); assert.ok(r.error); assert.match(r.text, /Zotero is not running/);
+}
+
+step('get_cited_pdf: Zotero (Better BibTeX and local API, groups), private context, refusals, copy, refresh, git');
+{
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'margin-cited-'));
+  const paper = path.join(dir, 'paper');
+  fs.cpSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'examples', 'sample-paper'), paper, { recursive: true });
+  const git = (...a) => execFileSync('git', ['-c', 'user.name=test', '-c', 'user.email=test@example.org', ...a], { cwd: paper, stdio: 'pipe' }).toString();
+  git('init', '-q'); git('add', '-A'); git('commit', '-qm', 'init');
+  const zot = await fakeZotero();
+  const prevZotero = process.env.MARGIN_ZOTERO_URL;
+  process.env.MARGIN_ZOTERO_URL = zot.url;
+  const cport = await freePort();
+  const srv = await startServer({ root: paper, port: cport });
+  const cc = new Client({ name: 'margin-test-cited', version: '0' });
+  await cc.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${cport}/mcp`)));
+  const ccall = async (name, args = {}) => { const x = await cc.callTool({ name, arguments: args }); return { error: !!x.isError, text: x.content.map((c) => c.text).join('\n') }; };
+  const cited = path.join(paper, '.margin-build', 'cited');
+  const read = (f) => fs.readFileSync(f, 'utf8');
+  const getPdf = (...keys) => ccall('get_cited_pdf', keys.length === 1 ? { key: keys[0] } : { keys });
+  const rel = (k) => `.margin-build/cited/${k}.pdf`;
+  const outside = path.join(dir, 'outside'); fs.mkdirSync(outside);
+  const status = () => git('status', '--porcelain', '--untracked-files=all').trim();
+
+  const tool = (await cc.listTools()).tools.find((t) => t.name === 'get_cited_pdf');
+  assert.ok(tool, 'get_cited_pdf is listed');
+  assert.match(tool.description, /Zotero/); assert.match(tool.description, /never downloads/i); assert.match(tool.description, /Read tool/);
+
+  // --- Better BibTeX: a stored file, a linked file (a name with spaces and brackets), a group library
+  let r = await getPdf('storedPaper2021');
+  console.log(r.text); assert.ok(!r.error);
+  assert.ok(r.text.includes(`read: ${rel('storedPaper2021')}`), 'the relative path to Read');
+  assert.ok(r.text.includes(path.join(paper, rel('storedPaper2021'))), 'and the absolute one');
+  assert.match(r.text, /A stored attachment — S\. Stone, R\. Roe \(2021\)/);
+  assert.match(r.text, /source: zotero \(Better BibTeX\)/);
+  assert.match(r.text, /Read tool/); assert.match(r.text, /pages range/);
+  assert.equal(read(path.join(cited, 'storedPaper2021.pdf')), read(zot.files.stored), 'the copy is the stored PDF');
+  assert.ok(Math.abs(fs.statSync(path.join(cited, 'storedPaper2021.pdf')).mtimeMs - fs.statSync(zot.files.stored).mtimeMs) < 2, 'the copy keeps the source mtime');
+  assert.equal(status(), '', 'git status stays empty');
+  assert.equal(execFileSync('git', ['check-ignore', rel('storedPaper2021')], { cwd: paper }).toString().trim(), rel('storedPaper2021'));
+  assert.ok(!(await (await fetch(`http://127.0.0.1:${cport}/api/tree`)).json()).some((f) => f.path.includes('margin-build')), 'the editor does not list .margin-build');
+
+  r = await getPdf('linkedPaper2020');
+  console.log(r.text); assert.ok(!r.error);
+  assert.equal(read(path.join(cited, 'linkedPaper2020.pdf')), read(zot.files.linked));
+
+  r = await getPdf('leeHeatwaveCopepod2022'); // group library; the HTML snapshot is listed first
+  console.log(r.text); assert.ok(!r.error);
+  assert.match(r.text, /library: Lab group/);
+  assert.match(r.text, /other attachments not copied: Snapshot\.html/);
+  assert.equal(read(path.join(cited, 'leeHeatwaveCopepod2022.pdf')), read(zot.files.leePdf));
+
+  // several keys at once, one of them unusable: the rest still come back
+  r = await getPdf('storedPaper2021', 'linkedPaper2020', 'noPdf2019', '../x');
+  console.log(r.text); assert.ok(!r.error);
+  assert.match(r.text, /storedPaper2021: A stored/); assert.match(r.text, /linkedPaper2020: A linked/);
+  assert.match(r.text, /no local PDF for noPdf2019/); assert.match(r.text, /\.\.\/x: Not a usable citation key/);
+  r = await ccall('get_cited_pdf', { key: 'storedPaper2021', keys: ['STOREDPAPER2021', 'linkedPaper2020'] });
+  assert.equal(r.text.match(/read: /g).length, 2, 'the same key twice (even in another case) is looked up once');
+
+  // --- no PDF, wrong attachments, missing files
+  r = await getPdf('noPdf2019');
+  console.log(r.text); assert.ok(r.error);
+  assert.match(r.text, /no local PDF for noPdf2019/); assert.match(r.text, /no PDF attached/);
+  assert.match(r.text, /Attach the PDF to the item in Zotero, or add noPdf2019\.pdf in Margin's Context view/);
+  r = await getPdf('htmlOnly2018'); console.log(r.text);
+  assert.ok(r.error); assert.match(r.text, /Snapshot\.html is not a PDF/);
+  r = await getPdf('fakePdf2017'); console.log(r.text);
+  assert.ok(r.error); assert.match(r.text, /Not really\.pdf is not a PDF/);
+  r = await getPdf('missingFile2016'); console.log(r.text);
+  assert.ok(r.error); assert.match(r.text, /not on this computer/);
+  r = await getPdf('nosuchkey'); console.log(r.text);
+  assert.ok(r.error); assert.match(r.text, /No item with citation key "nosuchkey" in Zotero/); assert.match(r.text, /Context view/);
+  for (const k of ['noPdf2019', 'htmlOnly2018', 'fakePdf2017', 'missingFile2016', 'nosuchkey']) assert.ok(!fs.existsSync(path.join(cited, `${k}.pdf`)), `nothing copied for ${k}`);
+
+  // --- keys that could become paths are refused before anything is touched
+  const before = fs.readdirSync(cited).sort();
+  const callsBefore = zot.calls.length;
+  for (const bad of ['../x', '../../x', 'a/b', 'a\\b', '..', '.', '.hidden', 'a b', 'a\nb', 'x.pdf/../y', 'ends.', '{x}', 'k'.repeat(200)]) {
+    r = await getPdf(bad); assert.ok(r.error, `refused ${JSON.stringify(bad)}`); assert.match(r.text, /Not a usable citation key/);
+  }
+  for (const empty of ['', '   ']) { r = await ccall('get_cited_pdf', { keys: [empty] }); assert.ok(r.error); assert.match(r.text, /citation key is required/); }
+  r = await ccall('get_cited_pdf', {}); assert.ok(r.error); assert.match(r.text, /Give a citation key/);
+  assert.deepEqual(fs.readdirSync(cited).sort(), before, 'refused keys left nothing behind');
+  assert.ok(!fs.existsSync(path.join(paper, '.margin-build', 'x.pdf')) && !fs.existsSync(path.join(dir, 'x.pdf')));
+  assert.equal(zot.calls.length, callsBefore, 'and never reached Zotero');
+
+  // --- the copy is refreshed when the source changes, and only then
+  r = await getPdf('storedPaper2021'); assert.match(r.text, /copy is current/);
+  fs.writeFileSync(zot.files.stored, '%PDF-1.4\n% a newer version of the stored PDF, longer\n%%EOF\n');
+  r = await getPdf('storedPaper2021'); assert.match(r.text, /copy refreshed because the source changed/);
+  assert.equal(read(path.join(cited, 'storedPaper2021.pdf')), read(zot.files.stored));
+  const same = read(zot.files.stored).replace('longer', 'LONGER'); // same size, later mtime
+  fs.writeFileSync(zot.files.stored, same); fs.utimesSync(zot.files.stored, new Date(), new Date(Date.now() + 60000));
+  r = await getPdf('storedPaper2021'); assert.match(r.text, /copy refreshed/);
+  assert.equal(read(path.join(cited, 'storedPaper2021.pdf')), same);
+  assert.deepEqual(fs.readdirSync(cited).filter((f) => f.endsWith('.tmp')), [], 'no temporary files left');
+
+  // --- the cache folder: a link in its place is refused; a link where the copy goes is replaced, never followed
+  const victim = path.join(outside, 'victim.txt'); fs.writeFileSync(victim, 'precious');
+  fs.rmSync(path.join(cited, 'linkedPaper2020.pdf')); fs.symlinkSync(victim, path.join(cited, 'linkedPaper2020.pdf'));
+  r = await getPdf('linkedPaper2020'); assert.ok(!r.error);
+  assert.equal(read(victim), 'precious', 'the link was not followed');
+  assert.ok(!fs.lstatSync(path.join(cited, 'linkedPaper2020.pdf')).isSymbolicLink());
+  fs.renameSync(cited, path.join(paper, '.margin-build', 'cited-real')); fs.symlinkSync(outside, cited);
+  r = await getPdf('storedPaper2021'); console.log(r.text);
+  assert.ok(r.error); assert.match(r.text, /not a plain folder/);
+  assert.deepEqual(fs.readdirSync(outside), ['victim.txt'], 'nothing was written through the link');
+  fs.unlinkSync(cited); fs.renameSync(path.join(paper, '.margin-build', 'cited-real'), cited);
+
+  // --- Zotero's local API (no Better BibTeX): stored, linked, group library, no PDF, snapshot only, web link
+  zot.mode = 'local';
+  r = await getPdf('kimGrazing2020'); console.log(r.text);
+  assert.ok(!r.error); assert.match(r.text, /Grazing by copepods — B\. Kim \(2020\)/); assert.match(r.text, /source: zotero \(Zotero local API\)/);
+  assert.equal(read(path.join(cited, 'kimGrazing2020.pdf')), read(zot.files.grazing));
+  assert.ok(zot.calls.includes('GET /api/users/0/items/BBBB2222/children') && zot.calls.includes('GET /api/users/0/items/KIMP0001/file/view/url'));
+  r = await getPdf('localLinked2020'); assert.ok(!r.error);
+  assert.equal(read(path.join(cited, 'localLinked2020.pdf')), read(zot.files.linked));
+  r = await getPdf('grpLocal2022'); console.log(r.text);
+  assert.ok(!r.error); assert.match(r.text, /library: group 7/);
+  assert.equal(read(path.join(cited, 'grpLocal2022.pdf')), read(zot.files.group));
+  assert.ok(zot.calls.includes('GET /api/groups/7/items/GGGG7777/children'));
+  r = await getPdf('localNoPdf2019'); assert.ok(r.error); assert.match(r.text, /no PDF attached/);
+  r = await getPdf('localHtml2018'); assert.ok(r.error); assert.match(r.text, /Snapshot\.html is not a PDF/);
+  r = await getPdf('localWeb2017'); console.log(r.text); assert.ok(r.error); assert.match(r.text, /a web link/);
+  zot.urlStyle = 'redirect'; // a Zotero whose local API only has GET .../file (a redirect to the file)
+  fs.rmSync(path.join(cited, 'kimGrazing2020.pdf'));
+  r = await getPdf('kimGrazing2020'); assert.ok(!r.error);
+  assert.equal(read(path.join(cited, 'kimGrazing2020.pdf')), read(zot.files.grazing));
+  zot.urlStyle = 'url';
+  zot.mode = 'bbt'; zot.noAttachmentsApi = true; // a Better BibTeX too old for item.attachments
+  fs.rmSync(path.join(cited, 'storedPaper2021.pdf'));
+  r = await getPdf('storedPaper2021'); console.log(r.text);
+  assert.ok(!r.error); assert.match(r.text, /Zotero local API/);
+  zot.noAttachmentsApi = false;
+
+  // --- Zotero first, then the private context
+  const up = async (name, body) => {
+    const res = await fetch(`http://127.0.0.1:${cport}/api/context/upload?name=${encodeURIComponent(name)}`, { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body });
+    assert.equal(res.status, 200, await res.clone().text());
+  };
+  await up('StoredPaper2021.pdf', Buffer.from('%PDF-1.4\n% the one in the context\n%%EOF\n'));
+  r = await getPdf('storedPaper2021');
+  assert.match(r.text, /source: zotero/, 'Zotero wins when it has a PDF');
+  assert.equal(read(path.join(cited, 'storedPaper2021.pdf')), read(zot.files.stored));
+  zot.mode = 'bbt';
+  await zot.close(); // Zotero is not running now
+  r = await getPdf('storedPaper2021');
+  console.log(r.text); assert.ok(!r.error);
+  assert.match(r.text, /source: context \(\.review\/context\/StoredPaper2021\.pdf\)/);
+  assert.match(read(path.join(cited, 'storedPaper2021.pdf')), /the one in the context/, 'the copy follows the new source');
+
+  await up('hobday2016.pdf', Buffer.from('%PDF-1.4\n% hobday\n%%EOF\n'));
+  r = await getPdf('hobday2016', 'oliver2018');
+  console.log(r.text); assert.ok(!r.error);
+  assert.match(r.text, /hobday2016: A hierarchical approach to defining marine heatwaves — Hobday, Alistair J\.; Alexander, Lisa V\.; Perkins, Sarah E\. \(2016\)/);
+  assert.match(r.text, /source: context/);
+  assert.match(r.text, /no local PDF for oliver2018/);
+  assert.match(r.text, /Zotero is not running/);
+  assert.match(r.text, /Attach the PDF to the item in Zotero, or add oliver2018\.pdf in Margin's Context view/);
+  r = await getPdf('oliver2018'); assert.ok(r.error);
+
+  // context files that must not be used: not a PDF, a link, over the size cap
+  const ctxDir = path.join(paper, '.review', 'context');
+  fs.writeFileSync(path.join(ctxDir, 'notpdf2020.pdf'), 'plain text, not a PDF');
+  fs.symlinkSync(victim, path.join(ctxDir, 'link2020.pdf'));
+  const big = path.join(ctxDir, 'big2020.pdf');
+  fs.writeFileSync(big, '%PDF-1.4\n'); fs.truncateSync(big, 100 * 1024 * 1024 + 1);
+  r = await getPdf('notpdf2020'); assert.ok(r.error); assert.match(r.text, /not a PDF/);
+  r = await getPdf('link2020'); assert.ok(r.error); assert.match(r.text, /no local PDF/);
+  r = await getPdf('big2020'); assert.ok(r.error); assert.match(r.text, /over the 100 MB limit/);
+  for (const k of ['notpdf2020', 'link2020', 'big2020']) assert.ok(!fs.existsSync(path.join(cited, `${k}.pdf`)), `nothing copied for ${k}`);
+  assert.equal(read(victim), 'precious');
+
+  assert.equal(status(), '', 'git status is still empty after all of it');
+  console.log('PDFs found in Zotero (BBT, local API, groups) and the context; refusals, copy in .margin-build/cited, refresh, links not followed, git clean');
+
+  await cc.close(); await srv.close();
+  if (prevZotero === undefined) delete process.env.MARGIN_ZOTERO_URL; else process.env.MARGIN_ZOTERO_URL = prevZotero;
+  fs.rmSync(dir, { recursive: true, force: true });
 }
 
 // Path safety: Project.abs() is the only gate between client paths and the disk,
@@ -2032,6 +2212,14 @@ step('margin init: MCP config, prompt hook, /margin command; idempotent, keeps t
   assert.equal(fs.readFileSync(path.join(dir, '.claude', 'hooks', 'margin-asks.mjs'), 'utf8'), tpl('hooks/margin-asks.mjs'));
   assert.equal(fs.readFileSync(path.join(dir, '.claude', 'hooks', 'margin-events.mjs'), 'utf8'), tpl('hooks/margin-events.mjs'));
   assert.equal(fs.readFileSync(path.join(dir, '.claude', 'commands', 'margin.md'), 'utf8'), tpl('commands/margin.md'));
+  assert.equal(fs.readFileSync(path.join(dir, '.claude', 'commands', 'check-citation-support.md'), 'utf8'), tpl('commands/check-citation-support.md'));
+  assert.match(tpl('commands/check-citation-support.md'), /get_cited_pdf/);
+  // a paper set up before this command existed gets it with the next init, and keeps an edited copy of the others
+  fs.rmSync(path.join(dir, '.claude', 'commands', 'check-citation-support.md'));
+  fs.writeFileSync(path.join(dir, '.claude', 'commands', 'review.md'), 'my own review command');
+  init(dir, { port: 4321, log: () => {} });
+  assert.equal(fs.readFileSync(path.join(dir, '.claude', 'commands', 'check-citation-support.md'), 'utf8'), tpl('commands/check-citation-support.md'));
+  assert.equal(fs.readFileSync(path.join(dir, '.claude', 'commands', 'review.md'), 'utf8'), 'my own review command');
   assert.equal(JSON.parse(fs.readFileSync(path.join(dir, '.mcp.json'), 'utf8')).mcpServers.margin.url, 'http://127.0.0.1:4321/mcp');
   // A stale copy of the hook script is refreshed; the author's CLAUDE.md is not.
   fs.writeFileSync(path.join(dir, '.claude', 'hooks', 'margin-asks.mjs'), '// old');
@@ -2323,39 +2511,103 @@ await client.close();
 if (running) { await running.close(); fs.rmSync(tmp, { recursive: true, force: true }); }
 process.exit(0);
 
-// Minimal stand-in for Zotero on 23119: Better BibTeX's item.search/item.export
-// (mode 'bbt'), or only Zotero's local API with BBT absent (mode 'local').
+// Minimal stand-in for Zotero on 23119: Better BibTeX's item.search/item.export/item.attachments
+// (mode 'bbt'), or only Zotero's local API with BBT absent (mode 'local'). It also has the attachment
+// files on disk (`files`, in a temp folder that close() removes): stored and linked PDFs, an HTML
+// snapshot, a file named .pdf that is not a PDF, and an attachment whose file is missing.
 async function fakeZotero() {
   const http = await import('node:http');
+  const { pathToFileURL } = await import('node:url');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'margin-fakezotero-'));
+  const put = (rel, content) => { const f = path.join(dir, rel); fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, content); return f; };
+  const pdf = (label) => `%PDF-1.4\n% ${label}\n1 0 obj<</Type/Catalog>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n`;
+  const files = {
+    html: put('storage/HTML0001/Snapshot.html', '<html><body>snapshot</body></html>'),
+    leePdf: put('storage/LEEP0001/Lee 2022.pdf', pdf('lee')),
+    stored: put('storage/STOR0001/Stored.pdf', pdf('stored')),
+    linked: put('Papers (linked)/Linked Paper.pdf', pdf('linked')),
+    fake: put('storage/FAKE0001/Not really.pdf', 'This is not a PDF, whatever the name says.\n'),
+    missing: path.join(dir, 'storage', 'GONE0001', 'Gone.pdf'),
+    grazing: put('storage/BBBB2222/Kim.pdf', pdf('kim')),
+    group: put('storage/GGGG7777/Group.pdf', pdf('group')),
+  };
   const items = [
     { id: 'http://zotero.org/groups/1/items/AAAA1111', library: 'Lab group', citekey: 'leeHeatwaveCopepod2022', title: 'Marine heatwave effects on copepod fecundity', author: [{ family: 'Lee', given: 'A.' }], issued: { 'date-parts': [[2022]] }, 'container-title': 'Limnol. Oceanogr.', DOI: '10.1002/lno.99999',
+      attachments: [{ path: files.html }, { path: files.leePdf }], // the snapshot comes first; the PDF is found anyway
       bib: '@article{leeHeatwaveCopepod2022,\n  title = {Marine Heatwave Effects on Copepod Fecundity},\n  author = {Lee, A.},\n  year = 2022,\n  month = jul,\n  journal = {Limnol. Oceanogr.},\n  doi = {10.1002/lno.99999},\n  abstract = {Long text.},\n  file = {/Users/someone/Zotero/storage/X/Lee.pdf}\n}\n' },
+    { id: 'u/1', library: 'My Library', citekey: 'storedPaper2021', title: 'A stored attachment', author: [{ family: 'Stone', given: 'S.' }, { family: 'Roe', given: 'R.' }], issued: { 'date-parts': [[2021]] }, attachments: [{ path: files.stored }] },
+    { id: 'u/2', library: 'My Library', citekey: 'linkedPaper2020', title: 'A linked file', author: [{ family: 'Link', given: 'L.' }], issued: { 'date-parts': [[2020]] }, attachments: [{ path: files.linked }] },
+    { id: 'u/3', library: 'My Library', citekey: 'noPdf2019', title: 'An item without any attachment', author: [{ family: 'Nope', given: 'N.' }], issued: { 'date-parts': [[2019]] }, attachments: [] },
+    { id: 'u/4', library: 'My Library', citekey: 'htmlOnly2018', title: 'Only a web snapshot', author: [{ family: 'Web', given: 'W.' }], issued: { 'date-parts': [[2018]] }, attachments: [{ path: files.html }, { path: false }] },
+    { id: 'u/5', library: 'My Library', citekey: 'fakePdf2017', title: 'Named .pdf, is not one', author: [{ family: 'Fake', given: 'F.' }], issued: { 'date-parts': [[2017]] }, attachments: [{ path: files.fake }] },
+    { id: 'u/6', library: 'My Library', citekey: 'missingFile2016', title: 'File not synced down', author: [{ family: 'Gone', given: 'G.' }], issued: { 'date-parts': [[2016]] }, attachments: [{ path: files.missing }] },
   ];
+  // Local API: My Library (/api/users/0) and one group (/api/groups/7), items with attachment children.
+  const att = (key, parent, filename, contentType, linkMode, file) => ({ key, data: { key, parentItem: parent, itemType: 'attachment', title: filename, filename, contentType, linkMode }, file });
   const localItem = { key: 'BBBB2222', data: { key: 'BBBB2222', itemType: 'journalArticle', title: 'Grazing by copepods', creators: [{ creatorType: 'author', firstName: 'B.', lastName: 'Kim' }], date: '2020', extra: 'Citation Key: kimGrazing2020' } };
-  const state = { mode: 'bbt' };
+  const mk = (key, title, citekey, year) => ({ key, data: { key, itemType: 'journalArticle', title, creators: [{ creatorType: 'author', firstName: 'X.', lastName: title.split(' ')[0] }], date: String(year), extra: `Citation Key: ${citekey}` } });
+  const scopes = {
+    '/api/users/0': {
+      items: [localItem, mk('IIII9999', 'A stored attachment', 'storedPaper2021', 2021), mk('DDDD4444', 'Linked local paper', 'localLinked2020', 2020), mk('EEEE5555', 'Nothing attached', 'localNoPdf2019', 2019), mk('FFFF6666', 'Snapshot only', 'localHtml2018', 2018), mk('HHHH8888', 'Weblink only', 'localWeb2017', 2017)],
+      children: {
+        BBBB2222: [att('KIMP0001', 'BBBB2222', 'Kim.pdf', 'application/pdf', 'imported_file', files.grazing)],
+        IIII9999: [att('STOR0002', 'IIII9999', 'Stored.pdf', 'application/pdf', 'imported_file', files.stored)],
+        DDDD4444: [att('LINK0001', 'DDDD4444', 'Linked Paper.pdf', 'application/pdf', 'linked_file', files.linked)],
+        FFFF6666: [att('SNAP0001', 'FFFF6666', 'Snapshot.html', 'text/html', 'imported_url', files.html)],
+        HHHH8888: [att('WEBL0001', 'HHHH8888', 'A web page', 'text/html', 'linked_url', null)],
+      },
+    },
+    '/api/groups/7': { items: [mk('GGGG7777', 'Group local paper', 'grpLocal2022', 2022)], children: { GGGG7777: [att('GRPP0001', 'GGGG7777', 'Group.pdf', 'application/pdf', 'imported_file', files.group)] } },
+  };
+  const state = { mode: 'bbt', files, calls: [], urlStyle: 'url' };
   const srv = http.createServer(async (req, res) => {
     let body = ''; for await (const c of req) body += c;
-    const send = (status, data, type = 'application/json') => { res.writeHead(status, { 'Content-Type': type }); res.end(typeof data === 'string' ? data : JSON.stringify(data)); };
+    const send = (status, data, type = 'application/json', headers = {}) => { res.writeHead(status, { 'Content-Type': type, ...headers }); res.end(typeof data === 'string' ? data : JSON.stringify(data)); };
     const url = new URL(req.url, 'http://x');
+    state.calls.push(`${req.method} ${url.pathname}`);
     if (url.pathname === '/better-bibtex/json-rpc') {
       if (state.mode !== 'bbt') return send(404, 'No endpoint found', 'text/plain');
       const { method, params } = JSON.parse(body);
       if (method === 'item.search') {
         const q = params[0].toLowerCase(); // phrase match, like BBT
-        return send(200, { jsonrpc: '2.0', id: 1, result: items.filter((i) => `${i.title} ${i.citekey}`.toLowerCase().includes(q)).map(({ bib, ...csl }) => csl) });
+        return send(200, { jsonrpc: '2.0', id: 1, result: items.filter((i) => `${i.title} ${i.citekey}`.toLowerCase().includes(q)).map(({ bib, attachments, ...csl }) => csl) });
+      }
+      if (method === 'item.attachments') {
+        if (state.noAttachmentsApi) return send(200, { jsonrpc: '2.0', id: null, error: { code: -32601, message: 'Method not found: item.attachments' } });
+        const it = items.find((i) => i.citekey === params[0] && (params[1] === '*' || i.library === (params[1] || 'My Library')));
+        return send(200, it ? { jsonrpc: '2.0', id: 1, result: it.attachments.map((a) => ({ open: 'zotero://open-pdf/library/items/X', path: a.path })) } : { jsonrpc: '2.0', id: null, error: { code: -32602, message: `${params[0]} not found` } });
       }
       const it = items.find((i) => i.citekey === params[0][0] && i.library === (params[2] || 'My Library'));
       return send(200, it ? { jsonrpc: '2.0', id: 1, result: it.bib } : { jsonrpc: '2.0', id: null, error: { code: -32602, message: `not found: ${params[0][0]}` } });
     }
-    if (url.pathname.startsWith('/api/users/0/items')) {
-      if (url.pathname.endsWith('/BBBB2222')) {
+    if (url.pathname === '/api/users/0/groups') return send(200, [{ id: 7, data: { id: 7, name: 'Lab group' } }]);
+    const m = url.pathname.match(/^(\/api\/(?:users\/0|groups\/7))\/items(?:\/top|\/([A-Z0-9]{8})(?:\/(children|file(?:\/view(?:\/url)?)?))?)?$/);
+    if (m) {
+      const [, scopeKey, itemKey, sub] = m;
+      const scope = scopes[scopeKey];
+      if (!itemKey) {
+        const q = (url.searchParams.get('q') || '').toLowerCase();
+        return send(200, q ? scope.items.filter((i) => `${i.data.title} ${i.data.extra}`.toLowerCase().includes(q)) : []);
+      }
+      if (sub === 'children') return send(200, (scope.children[itemKey] || []).map(({ file, ...a }) => a));
+      if (sub) {
+        const a = Object.values(scope.children).flat().find((c) => c.key === itemKey);
+        if (!a || !a.file) return send(404, 'Not found', 'text/plain');
+        if (sub === 'file/view/url') return state.urlStyle === 'url' ? send(200, pathToFileURL(a.file).href, 'text/plain') : send(404, 'No endpoint found', 'text/plain');
+        return send(302, '', 'text/plain', { Location: pathToFileURL(a.file).href });
+      }
+      if (itemKey === 'BBBB2222') {
         if (url.searchParams.get('format') === 'bibtex') return send(200, '@article{kim_grazing_2020,\n\ttitle = {Grazing by copepods},\n\tauthor = {Kim, B.},\n\tyear = {2020}\n}\n', 'text/plain');
         return send(200, localItem);
       }
-      return send(200, url.searchParams.get('q')?.match(/grazing|kimGrazing2020/i) ? [localItem] : []);
+      const it = scope.items.find((i) => i.key === itemKey);
+      return it ? send(200, it) : send(404, 'Not found', 'text/plain');
     }
     send(404, 'No endpoint found', 'text/plain');
   });
   await new Promise((ok) => srv.listen(0, '127.0.0.1', ok));
-  return Object.assign(state, { url: `http://127.0.0.1:${srv.address().port}`, close: () => new Promise((ok) => srv.close(ok)) });
+  return Object.assign(state, {
+    url: `http://127.0.0.1:${srv.address().port}`,
+    close: () => new Promise((ok) => srv.close(() => { fs.rmSync(dir, { recursive: true, force: true }); ok(); })),
+  });
 }
