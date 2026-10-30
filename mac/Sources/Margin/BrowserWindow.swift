@@ -5,12 +5,14 @@
 // rely on: JavaScript alert/confirm/prompt panels (without them confirm() silently returns false
 // and Remove, Accept all, Delete do nothing), file open panels, downloads (see Downloads.swift),
 // new windows for target=_blank and window.open, and the rule that only 127.0.0.1, localhost
-// and [::1] are shown in the app: every other link opens in the default browser.
+// and [::1] are shown in the app: every other link opens in the default browser. The Papers window
+// and paper windows also get the `margin` message handler (PageMessages.swift), and the Papers
+// window takes dropped files itself (NoteDrop.swift).
 import AppKit
 import WebKit
 
 @MainActor
-final class BrowserWindowController: NSWindowController, NSWindowDelegate, WKUIDelegate, WKNavigationDelegate {
+final class BrowserWindowController: NSWindowController, NSWindowDelegate, WKUIDelegate, WKNavigationDelegate, WKScriptMessageHandler {
     enum Kind {
         case papers
         case paper
@@ -28,6 +30,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, WKUID
     private var failedURL: URL?
     private var closingAfterFlush = false
     private var checkingClose = false
+    private let dropView: FileDropView?
 
     init(kind: Kind, configuration: WKWebViewConfiguration, manager: WindowManager, frameKey: String?, size: NSSize) {
         self.kind = kind
@@ -42,7 +45,20 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, WKUID
         window.isReleasedWhenClosed = false
         window.tabbingMode = .disallowed // a window per paper, not tabs
         window.minSize = NSSize(width: 560, height: 380)
-        window.contentView = web
+        if kind == .papers {
+            // Files dropped on the list go to the app (notes, folders), not to the page.
+            let drop = FileDropView(frame: frame)
+            web.frame = drop.bounds
+            web.autoresizingMask = [.width, .height]
+            drop.addSubview(web)
+            web.unregisterDraggedTypes()
+            window.contentView = drop
+            window.initialFirstResponder = web
+            dropView = drop
+        } else {
+            window.contentView = web
+            dropView = nil
+        }
         super.init(window: window)
         shouldCascadeWindows = false // WindowManager places windows (remembered frame, or cascaded)
         window.delegate = self
@@ -59,6 +75,12 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, WKUID
         titleObservation = webView.observe(\.title, options: [.new]) { [weak self] _, _ in
             MainActor.assumeIsolated { self?.updateTitle() }
         }
+        // Not for .other windows: their configuration comes from the page that opened them and
+        // shares its content controller, which already has the handler.
+        if kind != .other {
+            webView.configuration.userContentController.add(ScriptMessageProxy(self), name: PageMessage.handlerName)
+        }
+        dropView?.onDrop = { [weak self] urls in self?.manager?.filesDropped(urls) }
     }
 
     @available(*, unavailable)
@@ -71,7 +93,23 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, WKUID
 
     func bringToFront() {
         showWindow(nil)
+        if window?.isMiniaturized == true { window?.deminiaturize(nil) }
         window?.makeKeyAndOrderFront(nil)
+    }
+
+    /// The author is looking at this window: it is the key window of the active app.
+    var isInFront: Bool { NSApp.isActive && window?.isKeyWindow == true }
+
+    // MARK: - WKScriptMessageHandler (the page ↔ app contract, PageMessages.swift)
+
+    func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+        // Only this window's own page, in its main frame, from the origin this window is for.
+        guard message.webView === webView, message.frameInfo.isMainFrame else { return }
+        let origin = message.frameInfo.securityOrigin
+        let expected = kind == .paper ? paperPort : kind == .papers ? manager?.hub.port : nil
+        guard origin.protocol == "http", Links.loopbackHosts.contains(origin.host.lowercased()), let expected, origin.port == expected else { return }
+        guard let m = PageMessage(message.body) else { return }
+        manager?.pageMessage(m, from: self)
     }
 
     private func updateTitle() {
@@ -148,6 +186,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, WKUID
     }
 
     func windowWillClose(_ notification: Notification) {
+        if kind == .paper { webView.configuration.userContentController.removeScriptMessageHandler(forName: PageMessage.handlerName) }
         // Let AppKit finish closing before this controller (the window's delegate) may be released.
         let manager = manager
         Task { @MainActor in manager?.closed(self) }
@@ -209,6 +248,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, WKUID
         guard let url = webView.url, Links.isLoopback(url) else { return }
         failedURL = nil
         if kind == .paper, let port = manager?.paperPort(url) { paperPort = port }
+        if kind == .papers { webView.unregisterDraggedTypes() } // in case WebKit registered them again
     }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {

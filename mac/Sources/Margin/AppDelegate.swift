@@ -1,5 +1,6 @@
 // The app: starts (or attaches to) the hub, shows the Papers window, opens papers from the File
-// menu, Finder and the Dock, and stops the hub on quit.
+// menu, Finder and the Dock, adds notes dropped on it to a paper's context, answers the pages'
+// messages (notifications, split screen with Claude), and stops the hub on quit.
 import AppKit
 
 @MainActor
@@ -9,10 +10,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     let hub: HubController
     let windows: WindowManager
     let smoke: SmokeTest?
+    let notifier: Notifier
+    let terminal: ClaudeTerminal
+    let notes: NoteDrop
     var fileMenu: NSMenu?
     var recentMenu: NSMenu?
     private var hubReady = false
     private var pendingFolders: [URL] = [] // opened from Finder before the hub was ready
+    private var pendingDrops: [URL] = [] // the same for notes
     private var terminating = false
     private var replied = false
     private var quitWatchdog: Timer?
@@ -34,8 +39,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             hub.extraEnvironment["MARGIN_CONFIG_DIR"] = env["MARGIN_CONFIG_DIR"] ?? smoke.workDir.appendingPathComponent("config").path
         }
         self.hub = hub
-        windows = WindowManager(hub: hub)
+        let windows = WindowManager(hub: hub)
+        self.windows = windows
         self.smoke = smoke
+        notifier = Notifier(smoke: smokeMode)
+        terminal = ClaudeTerminal(smoke: smokeMode)
+        notes = NoteDrop(hub: hub, windows: windows)
         super.init()
     }
 
@@ -48,6 +57,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         hub.onUnexpectedExit = { [weak self] message in self?.hubStopped(message) }
         windows.onPapersChanged = { [weak self] _ in self?.rebuildRecent() }
+        windows.onPageMessage = { [weak self] message, from in self?.pageMessage(message, from: from) }
+        windows.onFilesDropped = { [weak self] urls in self?.openDropped(urls) }
+        notifier.onClick = { [weak self] port in self?.showPaper(port: port) }
+        notifier.start()
         NSApp.activate(ignoringOtherApps: true)
         Task { await self.startHub() }
     }
@@ -71,6 +84,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let folders = pendingFolders
         pendingFolders = []
         for f in folders { await addAndOpen(folder: f) }
+        let drops = pendingDrops
+        pendingDrops = []
+        if !drops.isEmpty { openDropped(drops) }
         if let smoke { Task { await smoke.run(self) } }
     }
 
@@ -132,15 +148,104 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         NSWorkspace.shared.open(Self.helpURL)
     }
 
-    /// Finder's Open With → Margin, and folders dropped on the Dock icon.
+    /// Finder's Open With → Margin, and folders or notes dropped on the Dock icon.
     func application(_ application: NSApplication, open urls: [URL]) {
-        if smoke != nil { return }
+        if smoke != nil { return } // the smoke test calls openDropped / notes.add itself
+        openDropped(urls)
+    }
+
+    /// Folders open as papers (a .tex file stands for the folder it is in); notes (.md, .txt,
+    /// .pdf, ...) go to a paper's private context (NoteDrop.swift). A drop may hold both.
+    func openDropped(_ urls: [URL]) {
+        guard hubReady else {
+            pendingDrops += urls
+            return
+        }
+        var noteFiles: [URL] = [], others: [URL] = []
         for url in urls where url.isFileURL {
             var isDir: ObjCBool = false
             guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir) else { continue }
-            // A .tex file stands for the folder it is in.
-            let folder = isDir.boolValue ? url : url.deletingLastPathComponent()
-            Task { await self.addAndOpen(folder: folder) }
+            if isDir.boolValue {
+                Task { await self.addAndOpen(folder: url) }
+            } else if url.pathExtension.lowercased() == "tex" {
+                Task { await self.addAndOpen(folder: url.deletingLastPathComponent()) }
+            } else if NoteDrop.isNote(url) {
+                noteFiles.append(url)
+            } else {
+                others.append(url)
+            }
+        }
+        if !noteFiles.isEmpty || !others.isEmpty { notes.enqueue(notes: noteFiles, others: others) }
+    }
+
+    // MARK: - the pages' messages (PageMessages.swift)
+
+    private func pageMessage(_ message: PageMessage, from c: BrowserWindowController) {
+        switch message {
+        case .notify(let title, let body, let tag):
+            guard c.kind == .paper, let port = c.paperPort else { return }
+            notifier.post(title: title, body: body, tag: tag, paperPort: port, inFront: c.isInFront)
+        case .splitWithClaude(let id):
+            if c.kind == .paper {
+                Task { await self.splitWithClaude(c) }
+            } else if c.kind == .papers, let id {
+                Task { await self.splitWithClaude(paperID: id) }
+            }
+        }
+    }
+
+    /// A notification was clicked: that paper's window, opened again if it was closed.
+    private func showPaper(port: Int) {
+        NSApp.activate(ignoringOtherApps: true)
+        if let c = windows.window(forPaperPort: port) {
+            c.bringToFront()
+        } else if let p = windows.papers.first(where: { $0.port == port }) {
+            windows.openPaper(id: p.id, port: port)
+        }
+    }
+
+    /// From the Papers page: open the paper's window (if need be), then split.
+    private func splitWithClaude(paperID id: String) async {
+        windows.openPaper(id: id)
+        var found: BrowserWindowController?
+        for _ in 0..<80 {
+            let port = windows.papers.first(where: { $0.id == id })?.port
+            if let port, let c = windows.window(forPaperPort: port), c.paperPort == port {
+                found = c
+                break
+            }
+            try? await Task.sleep(nanoseconds: 125_000_000)
+        }
+        if let found { await splitWithClaude(found) }
+    }
+
+    /// The paper's window on the top of its screen, Terminal running claude in the paper folder in
+    /// a strip below (SplitScreen.swift).
+    func splitWithClaude(_ c: BrowserWindowController) async {
+        guard let window = c.window, let port = c.paperPort else { return }
+        if window.styleMask.contains(.fullScreen) {
+            await Alerts.sheet("Leave full screen first", "Split screen puts this window on the top of the screen and Terminal below it. Leave full screen (View → Exit Full Screen, or ⌃⌘F), then press Claude terminal again.", on: window)
+            return
+        }
+        var paper = windows.papers.first { $0.port == port }
+        if paper == nil { paper = await windows.refreshPapers()?.first { $0.port == port } }
+        guard let paper else {
+            await Alerts.sheet("This paper is not in the Papers list", "Open it from the Papers window (Window → Papers), then press Claude terminal again.", on: window)
+            return
+        }
+        guard let screen = window.screen ?? NSScreen.main, let primary = NSScreen.screens.first else { return }
+        let rects = SplitLayout.rects(in: screen.visibleFrame)
+        let bounds = SplitLayout.appleScriptBounds(of: rects.terminal, primaryScreenFrame: primary.frame)
+        switch await terminal.open(paperPort: port, folder: paper.path, bounds: bounds) {
+        case .done:
+            window.setFrame(rects.editor, display: true, animate: smoke == nil)
+        case .notAllowed:
+            let answer = await Alerts.sheet("Margin may not control Terminal", "macOS asked whether Margin may control Terminal, and the answer was no. Allow it in System Settings → Privacy & Security → Automation → Margin (turn on Terminal), then press Claude terminal again.", on: window, buttons: ["Open System Settings", "Cancel"])
+            if answer == .alertFirstButtonReturn, smoke == nil, let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation") {
+                NSWorkspace.shared.open(url)
+            }
+        case .failed(let why):
+            await Alerts.sheet("Could not open Terminal", why, on: window)
         }
     }
 

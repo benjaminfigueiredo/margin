@@ -18,6 +18,7 @@ struct Paper: Decodable, Sendable {
     let url: String
     let state: String
     let pid: Int?
+    let error: String? // why it is in the "error" state
 }
 
 /// Requests to the hub's API. URLSession sends no Origin and no Sec-Fetch-Site, so the hub's
@@ -55,6 +56,12 @@ struct HubClient: Sendable {
     func addPaper(path: String) async throws -> Paper {
         let body = try JSONSerialization.data(withJSONObject: ["path": path])
         return try await send("api/papers", method: "POST", body: body, as: Paper.self)
+    }
+
+    /// POST /api/papers/<id>/start: starts the paper if it is not running; answers when it runs
+    /// (state "running") or could not start (state "error", and why in `error`).
+    func startPaper(id: String) async throws -> Paper {
+        try await send("api/papers/\(id)/start", method: "POST", body: Data("{}".utf8), as: Paper.self)
     }
 
     private func send<T: Decodable>(_ path: String, method: String, body: Data?, as type: T.Type) async throws -> T {

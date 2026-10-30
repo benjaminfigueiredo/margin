@@ -23,6 +23,10 @@ same "CFBundleExecutable" "$(key CFBundleExecutable)" Margin
 same "LSMinimumSystemVersion" "$(key LSMinimumSystemVersion)" 13.0
 same "opens folders (CFBundleDocumentTypes)" "$(key CFBundleDocumentTypes.0.LSItemContentTypes.0)" public.folder
 same "never the default app for folders (LSHandlerRank)" "$(key CFBundleDocumentTypes.0.LSHandlerRank)" Alternate
+same "takes notes: Markdown (CFBundleDocumentTypes)" "$(key CFBundleDocumentTypes.1.LSItemContentTypes.0)" net.daringfireball.markdown
+same "takes notes: plain text" "$(key CFBundleDocumentTypes.1.LSItemContentTypes.1)" public.plain-text
+same "takes notes: PDF" "$(key CFBundleDocumentTypes.1.LSItemContentTypes.2)" com.adobe.pdf
+same "never the default app for text, Markdown or PDF (LSHandlerRank)" "$(key CFBundleDocumentTypes.1.LSHandlerRank)" Alternate
 check "NSAppleEventsUsageDescription" test -n "$(key NSAppleEventsUsageDescription)"
 # Read the file (require() would take a relative path such as mac/dist/... for a package name).
 version="$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).version' "$res/package.json" 2>/dev/null || true)"

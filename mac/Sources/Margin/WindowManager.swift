@@ -11,6 +11,9 @@ final class WindowManager {
     private(set) var controllers: [BrowserWindowController] = []
     private(set) var papers: [Paper] = [] // the hub's list, as last fetched
     var onPapersChanged: (([Paper]) -> Void)?
+    /// A message from a page (PageMessages.swift), and files dropped on the Papers window.
+    var onPageMessage: ((PageMessage, BrowserWindowController) -> Void)?
+    var onFilesDropped: (([URL]) -> Void)?
     private var opening: Set<String> = []
     private var cascadePoint = NSPoint.zero
 
@@ -93,6 +96,18 @@ final class WindowManager {
     func window(forPaperPort port: Int) -> BrowserWindowController? {
         controllers.first { $0.kind == .paper && $0.paperPort == port }
     }
+
+    /// The paper window nearest the front (for "Add as context to which paper?").
+    func frontmostPaperWindow() -> BrowserWindowController? {
+        let papers = paperWindows
+        for w in NSApp.orderedWindows {
+            if let c = papers.first(where: { $0.window === w }), c.paperPort != nil { return c }
+        }
+        return nil
+    }
+
+    func pageMessage(_ message: PageMessage, from c: BrowserWindowController) { onPageMessage?(message, c) }
+    func filesDropped(_ urls: [URL]) { onFilesDropped?(urls) }
 
     @discardableResult
     func refreshPapers() async -> [Paper]? {

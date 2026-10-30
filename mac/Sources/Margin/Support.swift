@@ -34,6 +34,33 @@ enum Alerts {
         NSApp.activate(ignoringOtherApps: true)
         return alert.runModal()
     }
+
+    /// The same as a sheet on `window`, awaited: no nested run loop, so it is safe from a Task (a
+    /// modal alert there would hold up every other main-queue block until it is answered). Without
+    /// a visible window free for a sheet, a modal alert after all.
+    @discardableResult
+    static func sheet(_ title: String, _ message: String, style: NSAlert.Style = .warning, on window: NSWindow?, buttons: [String] = ["OK"]) async -> NSApplication.ModalResponse {
+        let alert = NSAlert()
+        alert.alertStyle = style
+        alert.messageText = title
+        alert.informativeText = message
+        for b in buttons { alert.addButton(withTitle: b) }
+        return await sheet(alert, on: window)
+    }
+
+    @discardableResult
+    static func sheet(_ alert: NSAlert, on window: NSWindow?) async -> NSApplication.ModalResponse {
+        if SmokeTest.isActive {
+            say("ALERT \(alert.messageText): \(alert.informativeText.replacingOccurrences(of: "\n", with: " | "))")
+            return .alertFirstButtonReturn
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        guard let window, window.isVisible, window.attachedSheet == nil else { return alert.runModal() }
+        window.makeKeyAndOrderFront(nil)
+        return await withCheckedContinuation { (c: CheckedContinuation<NSApplication.ModalResponse, Never>) in
+            alert.beginSheetModal(for: window) { response in c.resume(returning: response) }
+        }
+    }
 }
 
 enum LinkKind {

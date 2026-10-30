@@ -11,7 +11,7 @@ let package = Package(
         .executableTarget(
             name: "Margin",
             path: "Sources/Margin",
-            linkerSettings: [.linkedFramework("AppKit"), .linkedFramework("WebKit")]
+            linkerSettings: [.linkedFramework("AppKit"), .linkedFramework("WebKit"), .linkedFramework("UserNotifications")]
         ),
     ]
 )

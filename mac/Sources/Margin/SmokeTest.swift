@@ -4,7 +4,10 @@
 // temporary config folder, then checks: the Papers page loads and its script runs; if
 // MARGIN_SMOKE_PAPER names a paper folder, a copy of it opens in its own window, the editor
 // boots and its WebSocket connects, JavaScript dialogs are answered, opening it again focuses
-// the same window; a hub whose stdin closes exits by itself; and quitting through the normal
+// the same window, the page's messages reach the app (a notification after a Claude Code hook
+// event, recorded and never posted; the split-screen button, with Terminal never run), the split
+// rects are right for a few screen layouts, and notes "dropped" on the app land in the paper's
+// private context; a hub whose stdin closes exits by itself; and quitting through the normal
 // quit path stops the hub and the paper. Prints PASS/FAIL lines; exits 0 if everything passed.
 // Dialogs and save panels are answered automatically and printed: nothing waits for a person.
 import AppKit
@@ -97,6 +100,10 @@ final class SmokeTest {
         try? await Task.sleep(nanoseconds: 1_500_000_000)
         check(windows.paperWindows.count == 1, "opening the paper again brings its window forward instead of a second one (\(windows.paperWindows.count) window(s))")
 
+        splitLayoutChecks()
+        await pageMessageChecks(app, paper: paper, window: paperWindow)
+        await noteDropChecks(app, paper: paper)
+
         let running = await windows.refreshPapers()?.first { $0.id == paper.id }
         if let pid = running?.pid {
             paperPid = Int32(pid)
@@ -106,6 +113,119 @@ final class SmokeTest {
 
         await stdinCheck(hub)
         quit()
+    }
+
+    // MARK: - split screen, page messages, notes
+
+    /// The pure part of split screen: rects and AppleScript bounds for a few screen layouts.
+    private func splitLayoutChecks() {
+        step("split screen: the rects")
+        let primary = NSRect(x: 0, y: 0, width: 1920, height: 1200)
+        // The primary display with the menu bar (25 pt) and a hidden Dock: Terminal gets 22 %.
+        let r = SplitLayout.rects(in: NSRect(x: 0, y: 0, width: 1920, height: 1175))
+        check(r.terminal == NSRect(x: 0, y: 0, width: 1920, height: 259) && r.editor == NSRect(x: 0, y: 259, width: 1920, height: 916),
+              "editor on top, Terminal a 259 pt strip (22 %) at the bottom, no gap (\(r.editor) / \(r.terminal))")
+        let b = SplitLayout.appleScriptBounds(of: r.terminal, primaryScreenFrame: primary)
+        check(b == [0, 941, 1920, 1200], "AppleScript bounds count from the top left of the primary display (\(b))")
+        // A short screen: at least minTerminalHeight (about eight rows).
+        let small = SplitLayout.rects(in: NSRect(x: 0, y: 70, width: 1280, height: 700))
+        check(small.terminal == NSRect(x: 0, y: 70, width: 1280, height: SplitLayout.minTerminalHeight) && small.editor.height == 700 - SplitLayout.minTerminalHeight,
+              "a short screen still gives Terminal \(Int(SplitLayout.minTerminalHeight)) pt (\(small.terminal))")
+        // A second display above the primary one, and one to its left and lower (negative x and y).
+        let above = SplitLayout.appleScriptBounds(of: SplitLayout.rects(in: NSRect(x: 200, y: 1200, width: 1920, height: 1055)).terminal, primaryScreenFrame: primary)
+        check(above == [200, -232, 2120, 0], "a display above the primary one: negative top, bottom at the primary's top edge (\(above))")
+        let left = SplitLayout.appleScriptBounds(of: SplitLayout.rects(in: NSRect(x: -1680, y: -150, width: 1680, height: 1050)).terminal, primaryScreenFrame: primary)
+        check(left == [-1680, 1119, 0, 1350], "a display to the left and lower: negative left, bottom below the primary's (\(left))")
+    }
+
+    /// A Claude Code hook event on the paper's server reaches the app as a notify message, and the
+    /// page's split button reaches the split code (Terminal is never run in the smoke test).
+    private func pageMessageChecks(_ app: AppDelegate, paper: Paper, window w: BrowserWindowController) async {
+        step("page messages: a notification")
+        let notify: [String: Any] = ["type": "notify", "title": " T ", "body": "B", "tag": "claude"]
+        let parsed: [Bool] = [
+            PageMessage(notify) == PageMessage.notify(title: "T", body: "B", tag: "claude"),
+            PageMessage(["type": "splitWithClaude"] as [String: Any]) == PageMessage.splitWithClaude(paperID: nil),
+            PageMessage(["type": "splitWithClaude", "paper": "0123456789ab"] as [String: Any]) == PageMessage.splitWithClaude(paperID: "0123456789ab"),
+            PageMessage(["type": "splitWithClaude", "paper": "../../etc"] as [String: Any]) == nil,
+            PageMessage(["type": "notify"] as [String: Any]) == nil,
+            PageMessage(["type": "run", "cmd": "x"] as [String: Any]) == nil,
+            PageMessage("notify") == nil,
+        ]
+        check(!parsed.contains(false), "the page's messages are parsed; unknown or malformed ones are ignored (\(parsed))")
+        let before = app.notifier.recorded.count
+        let event: [String: Any] = ["event": "Notification", "notification_type": "permission_prompt", "message": "Smoke: Claude needs your permission to use Bash"]
+        let status = await postJSON(port: paper.port, path: "api/claude/event", event)
+        let arrived = await waitFor(seconds: 20) { app.notifier.recorded.count > before }
+        let n = app.notifier.recorded.last
+        let title = n?.title ?? "", body = n?.body ?? "", tag = n?.tag ?? "", port = n?.paperPort ?? 0
+        let right = title == "Claude needs you — \(paper.name)" && body == "Smoke: Claude needs your permission to use Bash" && tag == "claude" && port == paper.port
+        check(status == 200 && arrived && right, "a Notification hook event becomes a notify message from the paper's page (status \(status), got “\(title) | \(body)”, tag \(tag), port \(port))")
+
+        step("page messages: split screen with Claude")
+        let clicked = await w.evaluate("(() => { const b = document.querySelector('#btn-split-claude'); if (!b || b.classList.contains('hidden')) return 'hidden'; b.click(); return 'clicked'; })()")
+        let split = await waitFor(seconds: 10) { app.terminal.recorded.count == 1 }
+        let req = app.terminal.recorded.first
+        let resolved = { (p: String) in URL(fileURLWithPath: p).resolvingSymlinksInPath().path }
+        let same = req.map { resolved($0.folder) == resolved(paper.path) } ?? false
+        let firstID = req?.windowID ?? -1
+        check(clicked == "clicked" && split && same && firstID == 0,
+              "the page's Claude terminal button asks for Terminal in the paper folder (\(clicked ?? "no answer"); \(req.map { "\($0.folder) \($0.bounds)" } ?? "nothing"))")
+        if let window = w.window, let screen = window.screen ?? NSScreen.main, let primary = NSScreen.screens.first {
+            let rects = SplitLayout.rects(in: screen.visibleFrame)
+            let near = { (a: CGFloat, b: CGFloat) -> Bool in abs(a - b) < 2 }
+            _ = await waitFor(seconds: 3) { near(window.frame.minY, rects.editor.minY) }
+            let f = window.frame, e = rects.editor
+            let close = near(f.minX, e.minX) && near(f.minY, e.minY) && near(f.width, e.width) && near(f.height, e.height)
+            check(close, "the paper's window fills the top of its screen (\(f) for \(rects.editor) on \(screen.visibleFrame))")
+            check(req?.bounds == SplitLayout.appleScriptBounds(of: rects.terminal, primaryScreenFrame: primary.frame), "and Terminal gets the strip below it (\(req?.bounds ?? []))")
+        } else {
+            fail("the paper's window has no screen")
+        }
+        await app.splitWithClaude(w)
+        let again = app.terminal.recorded.last
+        check(app.terminal.recorded.count == 2 && again?.windowID == 9001, "pressing again re-arranges the same Terminal window (id \(again?.windowID ?? -1)) instead of opening another")
+    }
+
+    /// What dropping notes on the Dock icon does (application(_:open:) is skipped in the smoke
+    /// test, so its handler is called directly): they land in the paper's private context.
+    private func noteDropChecks(_ app: AppDelegate, paper: Paper) async {
+        step("notes dropped on the app")
+        let dir = workDir.appendingPathComponent("drop", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let good = dir.appendingPathComponent("smoke note + call.md")
+        let binary = dir.appendingPathComponent("not text.txt")
+        let other = dir.appendingPathComponent("slides.key")
+        do {
+            try Data("# Smoke note\n\nFrom a call about the paper.\n".utf8).write(to: good)
+            try Data([0x61, 0x00, 0x62, 0x00]).write(to: binary)
+            try Data("x".utf8).write(to: other)
+        } catch {
+            return fail("could not write the notes to drop: \(error.localizedDescription)")
+        }
+        let results = await app.notes.add(notes: [good, binary], others: [other])
+        let lines = results.map { r -> String in r.addedAs.map { "\(r.file) → \($0)" } ?? "\(r.file) → not added: \(r.problem ?? "")" }
+        say("results: \(lines.joined(separator: "; "))")
+        check(results.count == 3 && results[0].addedAs == "smoke note + call.md", "a .md note is added under its own name (spaces and + included)")
+        check(results.count == 3 && results[1].addedAs == nil && (results[1].problem ?? "").contains("plain text"), "a .txt that is not text is refused with the paper's own message")
+        check(results.count == 3 && results[2].addedAs == nil && (results[2].problem ?? "").contains("not a note"), "a file that is not a note is reported, not sent")
+        let listed = await getJSON(port: paper.port, path: "api/context")
+        let names = ((listed?["items"] as? [[String: Any]]) ?? []).compactMap { $0["name"] as? String }
+        check(names.contains("smoke note + call.md") && !names.contains("not text.txt"), "the paper's GET /api/context lists it (\(names))")
+    }
+
+    private func postJSON(port: Int, path: String, _ body: [String: Any]) async -> Int {
+        var request = URLRequest(url: URL(string: "http://127.0.0.1:\(port)/\(path)")!)
+        request.httpMethod = "POST"
+        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        guard let answer = try? await HubClient.session.data(for: request) else { return 0 }
+        return (answer.1 as? HTTPURLResponse)?.statusCode ?? 0
+    }
+
+    private func getJSON(port: Int, path: String) async -> [String: Any]? {
+        guard let answer = try? await HubClient.session.data(from: URL(string: "http://127.0.0.1:\(port)/\(path)")!) else { return nil }
+        return (try? JSONSerialization.jsonObject(with: answer.0)) as? [String: Any]
     }
 
     /// A second hub, to check what happens when the app dies: its stdin closes, and it must exit.
