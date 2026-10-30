@@ -22,6 +22,7 @@ import * as projectSearch from './search.js';
 import { mountResponseRoutes } from './responses.js';
 import { ContextStore, mountContextRoutes } from './context.js';
 import { createClaudeLink } from './asks.js';
+import { createClaudeEvents } from './claude-events.js';
 import { changes as projectChanges, acceptedSince } from './changes.js';
 import * as latexdiff from './latexdiff.js';
 import { loopbackHosts, hostGuard, crossSiteGuard, upgradeAllowed, listenLoopback } from './localhost.js';
@@ -81,7 +82,9 @@ export async function startServer({ root, port = 4242, main, engine, configDir, 
     return state.compiling;
   };
 
-  const claude = createClaudeLink({ review, broadcast });
+  // Claude finished, needs the author, answered an ask: broadcast for notifications (hooks POST here).
+  const claudeEvents = createClaudeEvents({ project, review, broadcast });
+  const claude = createClaudeLink({ review, broadcast, onPrompt: () => claudeEvents.turnStarted() });
   const ctx = { project, review, context, state, broadcast, compile: runCompile };
   review.on('change', () => broadcast({ type: 'review-changed' }));
 
@@ -269,6 +272,7 @@ export async function startServer({ root, port = 4242, main, engine, configDir, 
   api.get('/citations', handle(async () => checkCitations(project)));
 
   claude.mount(api);
+  claudeEvents.mount(api);
   // Errors from the body parsers (an oversized upload, malformed JSON) as JSON, like every other error here.
   api.use((err, req, res, next) => {
     if (res.headersSent) return next(err);
@@ -382,7 +386,7 @@ export async function startServer({ root, port = 4242, main, engine, configDir, 
 
   // 127.0.0.1, and ::1 as well when the machine has IPv6 (macOS may resolve localhost to it first).
   const { server, server6 } = await listenLoopback(app, port, { onUpgrade });
-  return { server, project, review, gitPoll, gitTimerActive: () => gitTimer !== null, close: async () => { clearInterval(gitTimer); claude.close(); gitTimer = null; await watcher.close(); wss.close(); server.close(); server6.close(); } };
+  return { server, project, review, gitPoll, gitTimerActive: () => gitTimer !== null, close: async () => { clearInterval(gitTimer); claude.close(); claudeEvents.close(); gitTimer = null; await watcher.close(); wss.close(); server.close(); server6.close(); } };
 }
 
 // Content-Disposition for a file the browser shows itself but should save under `name`.

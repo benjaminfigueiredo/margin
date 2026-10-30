@@ -1834,6 +1834,175 @@ step('Ask Claude prompt hook: with Margin running, with no server, with no .mcp.
   fs.rmSync(proj, { recursive: true, force: true });
 }
 
+step('notifications: the Stop / Notification hook endpoint, coalescing, the hook script, ask answers');
+{
+  const { spawn } = await import('node:child_process');
+  const { WebSocket } = await import('ws');
+  const { eventsHookCommand } = await import('../server/init.js');
+  const lastEvent = async () => (await rest('/claude/events')).events.at(-1);
+  const post = (body) => rest('/claude/event', { method: 'POST', body });
+  // What the page receives: claude-event messages over the WebSocket.
+  const heard = [];
+  const ws = new WebSocket(`${base.replace('http', 'ws')}/ws`);
+  ws.on('message', (d) => { const m = JSON.parse(d); if (m.type === 'claude-event') heard.push(m); });
+  await new Promise((ok, fail) => { ws.once('open', ok); ws.once('error', fail); });
+  // JSON only (a plain cross-site form post cannot reach it), and only the two events.
+  const form = await fetch(`${base}/api/claude/event`, { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: '{"event":"Stop"}' });
+  assert.equal(form.status, 415);
+  const bogus = await fetch(`${base}/api/claude/event`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{"event":"PreToolUse"}' });
+  assert.equal(bogus.status, 400);
+
+  // The hook script, run as Claude Code runs it (the command from settings.local.json through sh,
+  // JSON on stdin), in a folder whose .mcp.json points at this server.
+  const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'margin-events-hook-'));
+  const script = fileURLToPath(new URL('../templates/hooks/margin-events.mjs', import.meta.url));
+  fs.mkdirSync(path.join(proj, '.claude', 'hooks'), { recursive: true });
+  fs.copyFileSync(script, path.join(proj, '.claude', 'hooks', 'margin-events.mjs'));
+  const mcpAt = (url) => fs.writeFileSync(path.join(proj, '.mcp.json'), JSON.stringify({ mcpServers: { margin: { type: 'http', url } } }));
+  // Async: the test server runs in this process, so a blocking spawn would starve it.
+  const runHook = (event, input) => new Promise((resolve) => {
+    const t0 = Date.now();
+    const p = spawn('sh', ['-c', eventsHookCommand(event)], { env: { ...process.env, CLAUDE_PROJECT_DIR: proj } });
+    let out = '', err = '';
+    p.stdout.on('data', (c) => { out += c; });
+    p.stderr.on('data', (c) => { err += c; });
+    const kill = setTimeout(() => p.kill('SIGKILL'), 10000);
+    p.on('close', (code) => { clearTimeout(kill); resolve({ code, out, err, ms: Date.now() - t0 }); });
+    p.stdin.end(typeof input === 'string' ? input : JSON.stringify({ hook_event_name: event, cwd: proj, session_id: 's', ...input }));
+  });
+  mcpAt(`${base}/mcp`);
+
+  // A turn: the author's prompt (the Ask Claude hook's request starts it), Claude adds a
+  // suggestion and a comment in one file, then stops. The Stop says what it added.
+  await rest('/asks/deliver', { method: 'POST', body: {} });
+  r = await call('suggest_edit', { file: 'sections/intro.tex', original: 'several heatwaves one after another', replacement: 'repeated heatwaves', rationale: 'Notification test.' });
+  assert.ok(!r.error, r.text);
+  r = await call('add_comment', { file: 'sections/intro.tex', quote: 'In this study we ask whether', comment: 'Notification test: is this the main question?' });
+  assert.ok(!r.error, r.text);
+  let h = await runHook('Stop', { stop_hook_active: false, last_assistant_message: 'Done: one suggestion and one comment.' });
+  assert.equal(h.code, 0, h.err); assert.equal(h.out, '', 'the Stop hook prints nothing (it must never block Claude from stopping)'); assert.equal(h.err, '');
+  let ev = await lastEvent();
+  assert.equal(ev.kind, 'done', JSON.stringify(ev));
+  assert.equal(ev.title, 'Claude is done');
+  assert.equal(ev.body, 'sections/intro.tex: 1 suggestion, 1 comment');
+  console.log(`Stop hook: exit 0 in ${h.ms} ms → "${ev.title}: ${ev.body}"`);
+  // Several Stops within a few seconds are one.
+  let x = await post({ event: 'Stop' });
+  assert.equal(x.sent, false); assert.match(x.reason, /Stop a moment ago/);
+  // Claude needs the author: a permission prompt, with Claude Code's own message.
+  h = await runHook('Notification', { message: 'Claude needs your permission to use Bash', title: 'Permission needed', notification_type: 'permission_prompt' });
+  assert.equal(h.code, 0, h.err); assert.equal(h.out, '');
+  ev = await lastEvent();
+  assert.equal(ev.kind, 'needs-you'); assert.equal(ev.title, 'Claude needs you'); assert.equal(ev.body, 'Claude needs your permission to use Bash');
+  // Another one a moment later, and one that is not for the author: not announced.
+  x = await post({ event: 'Notification', notification_type: 'elicitation_dialog', message: 'again' });
+  assert.equal(x.sent, false); assert.match(x.reason, /moment ago/);
+  x = await post({ event: 'Notification', notification_type: 'auth_success', message: 'Logged in' });
+  assert.equal(x.sent, false); assert.match(x.reason, /not for the author/);
+  // Everything announced reached the page, in order.
+  await new Promise((ok) => setTimeout(ok, 200));
+  assert.deepEqual(heard.map((m) => m.kind), ['done', 'needs-you'], JSON.stringify(heard));
+  assert.ok(heard.every((m) => m.title && Number.isFinite(m.at)));
+
+  // Claude answers an Ask. This paper has no Stop hook installed, so the answer is announced by
+  // itself (with the hook it rides on the Stop that ends the turn: see the next step).
+  const ask = await rest('/review/comment', { method: 'POST', body: { file: 'main.tex', quote: 'Marine heatwaves', comment: 'Notification test: is the title too long?', ask: true } });
+  r = await call('reply', { id: ask.id.slice(0, 8), text: 'It is fine.' });
+  assert.ok(!r.error, r.text);
+  for (let i = 0; i < 40 && (await lastEvent()).kind !== 'answered'; i++) await new Promise((ok) => setTimeout(ok, 100));
+  ev = await lastEvent();
+  assert.equal(ev.kind, 'answered', JSON.stringify(ev)); assert.equal(ev.title, 'Claude answered your question');
+  assert.match(ev.body, /Notification test: is the title too long\?.*main\.tex/);
+
+  // No server on the port, a port that never answers, no .mcp.json, garbage on stdin: exit 0, silent, quick.
+  const net = await import('node:net');
+  const free = await new Promise((ok) => { const sv = net.createServer().listen(0, '127.0.0.1', () => { const p = sv.address().port; sv.close(() => ok(p)); }); });
+  mcpAt(`http://127.0.0.1:${free}/mcp`);
+  h = await runHook('Stop', {});
+  assert.equal(h.code, 0); assert.equal(h.out, ''); assert.equal(h.err, ''); assert.ok(h.ms < 2000, `took ${h.ms} ms with no server`);
+  console.log(`no server: exit 0 in ${h.ms} ms, silent`);
+  const hang = net.createServer(() => {}).listen(0, '127.0.0.1');
+  await new Promise((ok) => hang.once('listening', ok));
+  mcpAt(`http://127.0.0.1:${hang.address().port}/mcp`);
+  h = await runHook('Notification', { notification_type: 'idle_prompt', message: 'Claude is waiting for your input' });
+  assert.equal(h.code, 0); assert.equal(h.out, ''); assert.ok(h.ms < 3500, `took ${h.ms} ms against a hanging port`);
+  console.log(`hanging port: exit 0 in ${h.ms} ms, silent`);
+  hang.close();
+  fs.rmSync(path.join(proj, '.mcp.json'));
+  h = await runHook('Stop', {});
+  assert.equal(h.code, 0); assert.equal(h.out, '');
+  h = await runHook('Stop', 'not json');
+  assert.equal(h.code, 0); assert.equal(h.out, '');
+  ws.close();
+  fs.rmSync(proj, { recursive: true, force: true });
+  for (const it of await rest('/review')) {
+    if (it.id === ask.id || /^Notification test/.test(it.body || '')) await rest(`/review/${it.id}`, { method: 'DELETE' });
+  }
+}
+
+step('notifications: coalescing rules and the turn summary (fake clock)');
+{
+  const { createClaudeEvents } = await import('../server/claude-events.js');
+  const { EventEmitter } = await import('node:events');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'margin-events-unit-'));
+  let clock = Date.parse('2026-10-30T10:00:00Z');
+  const review = Object.assign(new EventEmitter(), { data: { items: [] } });
+  const sent = [];
+  const ev = createClaudeEvents({ project: { root: dir }, review, broadcast: (m) => sent.push(m), now: () => clock, timing: { answerDelayMs: 0 } });
+  const later = (s) => { clock += s * 1000; };
+  const iso = () => new Date(clock).toISOString();
+  const routes = {};
+  ev.mount({ post: (p, f) => { routes[p] = f; }, get: () => {} });
+  const hook = (body) => new Promise((ok) => routes['/claude/event']({ is: () => true, body }, { status() { return this; }, json: ok }));
+  const add = (o) => { const it = { id: crypto.randomUUID(), status: 'open', createdAt: iso(), replies: [], ...o }; review.data.items.push(it); return it; };
+  ev.turnStarted();
+  later(1); add({ kind: 'suggestion', file: 'a.tex', author: 'claude' }); add({ kind: 'suggestion', file: 'b.tex', author: 'claude' }); add({ kind: 'comment', file: 'a.tex', author: 'you', body: 'mine' });
+  assert.equal((await hook({ event: 'Stop' })).event.body, '2 suggestions in 2 files');
+  later(6);
+  let x = await hook({ event: 'Stop', last_assistant_message: '\nAll set: the abstract now has 248 words.\nMore.' });
+  assert.equal(x.event.body, 'All set: the abstract now has 248 words.', 'nothing added: the first line of what Claude said');
+  later(60);
+  x = await hook({ event: 'Notification', notification_type: 'idle_prompt', message: 'Claude is waiting for your input' });
+  assert.equal(x.sent, false, 'waiting for input right after "done": the author has been told');
+  ev.turnStarted(); later(30);
+  x = await hook({ event: 'Notification', notification_type: 'permission_prompt', message: 'Claude needs your permission to use Edit' });
+  assert.equal(x.event.kind, 'needs-you');
+  later(2);
+  x = await hook({ event: 'Stop' });
+  assert.equal(x.sent, false, 'a Stop right after "needs you"');
+  later(10);
+  x = await hook({ event: 'Notification' });
+  assert.equal(x.event.body, 'Claude is waiting for you in the terminal.', 'an older Claude Code, without notification_type');
+  // With the Stop hook installed, an ask answered during the turn rides on the Stop.
+  fs.mkdirSync(path.join(dir, '.claude'), { recursive: true });
+  fs.writeFileSync(path.join(dir, '.claude', 'settings.local.json'), JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'command', command: 'node .claude/hooks/margin-events.mjs Stop' }] }] } }));
+  ev.turnStarted(); later(30);
+  const a1 = add({ kind: 'comment', file: 'a.tex', author: 'you', ask: true, body: 'Why?' });
+  review.emit('change');
+  later(5);
+  a1.replies.push({ author: 'claude', body: 'Because.', createdAt: iso() });
+  review.emit('change');
+  await new Promise((ok) => setTimeout(ok, 20));
+  const before = sent.length;
+  later(5);
+  x = await hook({ event: 'Stop' });
+  assert.equal(sent.length, before + 1, 'no separate "answered" before the Stop');
+  assert.equal(x.event.body, '1 reply · answered your question');
+  // Without it, the answer is announced on its own.
+  fs.rmSync(path.join(dir, '.claude'), { recursive: true });
+  ev.turnStarted(); later(30);
+  const a2 = add({ kind: 'comment', file: 'b.tex', author: 'you', ask: true, body: 'And this?' });
+  review.emit('change');
+  later(5);
+  add({ kind: 'suggestion', file: 'b.tex', author: 'claude', askId: a2.id });
+  review.emit('change');
+  await new Promise((ok) => setTimeout(ok, 20));
+  assert.equal(sent.at(-1).kind, 'answered'); assert.equal(sent.at(-1).body, '“And this?” (b.tex)');
+  ev.close();
+  fs.rmSync(dir, { recursive: true, force: true });
+  console.log(`${sent.length} events; repeats, "needs you" then Stop, and idle after done were coalesced`);
+}
+
 step('margin init: MCP config, prompt hook, /margin command; idempotent, keeps the author\'s hooks');
 {
   const { init } = await import('../server/init.js');
@@ -1853,9 +2022,15 @@ step('margin init: MCP config, prompt hook, /margin command; idempotent, keeps t
   assert.equal(ups.length, 2, 'the author\'s hook is kept and ours is added once');
   assert.deepEqual(ups[0].hooks[0], mine);
   assert.deepEqual(ups[1].hooks, [{ type: 'command', command: 'node "$CLAUDE_PROJECT_DIR/.claude/hooks/margin-asks.mjs"', timeout: 5 }]);
-  assert.deepEqual(st.hooks.Stop, [{ hooks: [mine] }]);
+  assert.equal(st.hooks.Stop.length, 2, 'the author\'s Stop hook is kept and ours is added once');
+  assert.deepEqual(st.hooks.Stop[0], { hooks: [mine] });
+  assert.deepEqual(st.hooks.Stop[1].hooks, [{ type: 'command', command: 'node "$CLAUDE_PROJECT_DIR/.claude/hooks/margin-events.mjs" Stop', timeout: 5 }]);
+  assert.deepEqual(st.hooks.Notification, [{ hooks: [{ type: 'command', command: 'node "$CLAUDE_PROJECT_DIR/.claude/hooks/margin-events.mjs" Notification', timeout: 5 }] }]);
+  const { hooksInstalled } = await import('../server/init.js');
+  assert.equal(hooksInstalled(dir), true);
   const tpl = (p) => fs.readFileSync(fileURLToPath(new URL(`../templates/${p}`, import.meta.url)), 'utf8');
   assert.equal(fs.readFileSync(path.join(dir, '.claude', 'hooks', 'margin-asks.mjs'), 'utf8'), tpl('hooks/margin-asks.mjs'));
+  assert.equal(fs.readFileSync(path.join(dir, '.claude', 'hooks', 'margin-events.mjs'), 'utf8'), tpl('hooks/margin-events.mjs'));
   assert.equal(fs.readFileSync(path.join(dir, '.claude', 'commands', 'margin.md'), 'utf8'), tpl('commands/margin.md'));
   assert.equal(JSON.parse(fs.readFileSync(path.join(dir, '.mcp.json'), 'utf8')).mcpServers.margin.url, 'http://127.0.0.1:4321/mcp');
   // A stale copy of the hook script is refreshed; the author's CLAUDE.md is not.
@@ -1869,6 +2044,17 @@ step('margin init: MCP config, prompt hook, /margin command; idempotent, keeps t
   const status = execFileSync('git', ['status', '--porcelain', '--untracked-files=all'], { cwd: dir }).toString();
   assert.equal(status.trim(), '', `init left files git would push:\n${status}`);
   assert.ok(new Project(dir).isIgnored('.claude/hooks/margin-asks.mjs'));
+  assert.ok(new Project(dir).isIgnored('.claude/hooks/margin-events.mjs'));
+  // A paper set up by an older Margin (the prompt hook only) is "outdated" until init runs again,
+  // which adds the notification hooks and keeps everything else.
+  const older = JSON.parse(fs.readFileSync(settingsFile, 'utf8'));
+  delete older.hooks.Notification; older.hooks.Stop = [{ hooks: [mine] }];
+  fs.writeFileSync(settingsFile, JSON.stringify(older));
+  assert.equal(hooksInstalled(dir), false);
+  init(dir, { port: 4321, log: () => {} });
+  assert.equal(hooksInstalled(dir), true);
+  const again = JSON.parse(fs.readFileSync(settingsFile, 'utf8')).hooks;
+  assert.equal(again.UserPromptSubmit.length, 2); assert.equal(again.Stop.length, 2); assert.deepEqual(again.Stop[0], { hooks: [mine] });
   fs.rmSync(dir, { recursive: true, force: true });
 
   // A repository without an origin is an expected case that init reports itself: git's own

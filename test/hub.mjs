@@ -114,6 +114,7 @@ const [a, b] = (await Promise.all([api('/papers', { method: 'POST', body: { path
 assert.ok(a.port >= firstPaperPort && b.port >= firstPaperPort && a.port !== b.port && a.port !== hubPort && b.port !== hubPort);
 assert.equal(a.id, paperId(paperA)); assert.equal(b.path, paperB);
 assert.equal(a.state, 'stopped'); assert.equal(a.claude.setup, true); assert.equal(b.claude.setup, false);
+assert.equal(a.claude.outdated, false, 'set up by this version of margin init: nothing to update');
 const again = (await api('/papers', { method: 'POST', body: { path: path.join(paperA, '..', 'paper-a') } })).body;
 assert.equal(again.id, a.id); assert.equal(again.port, a.port);
 assert.equal((await api('/papers')).body.papers.length, 2);
@@ -170,8 +171,16 @@ step('"Set up for Claude" runs margin init with the paper\'s port and keeps the 
   // And Claude Code's MCP client reaches B through that URL.
   const res = await fetch(mb.mcpServers.margin.url, { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 't', version: '0' } } }) });
   assert.equal(res.status, 200);
+  assert.equal(r.body.claude.outdated, false);
+  // Set up by an older Margin (no notification hooks): "Update for Claude" runs init again.
+  const sf = path.join(paperB, '.claude', 'settings.local.json');
+  const st = readJson(sf);
+  delete st.hooks.Stop; delete st.hooks.Notification;
+  fs.writeFileSync(sf, JSON.stringify(st));
+  assert.equal((await api('/papers')).body.papers.find((p) => p.id === b.id).claude.outdated, true);
+  assert.equal((await api(`/papers/${b.id}/setup-claude`, { method: 'POST' })).body.claude.outdated, false);
 }
-console.log('B set up for Claude at its own port');
+console.log('B set up for Claude at its own port; an older setup is offered the update');
 
 step('the hub refuses cross-site requests and other hosts, including from a paper page');
 {

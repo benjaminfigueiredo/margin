@@ -31,7 +31,7 @@ export function formatAsks(asks, { forHook = false } = {}) {
 }
 
 // What the status bar shows: when a Claude Code session last talked to Margin, and how.
-export function createClaudeLink({ review, broadcast }) {
+export function createClaudeLink({ review, broadcast, onPrompt = () => {} }) {
   const seen = { at: null, what: null, client: null };
   let timer = null;
   const note = (what) => {
@@ -62,6 +62,7 @@ export function createClaudeLink({ review, broadcast }) {
         if (!req.is('application/json')) return res.status(415).json({ error: 'JSON only' });
         try {
           note('prompt');
+          onPrompt(); // a turn starts: what Claude adds from now on is its work (server/claude-events.js)
           const asks = review.pendingAsks({ states: ['waiting'] });
           const text = formatAsks(asks, { forHook: true });
           if (asks.length) review.markPickedUp(asks.slice(0, MAX_IN_PROMPT).map((a) => a.id), 'prompt');

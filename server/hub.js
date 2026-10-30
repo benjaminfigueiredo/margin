@@ -21,7 +21,7 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { loopbackHosts, hostGuard, crossSiteGuard, listenLoopback } from './localhost.js';
 import { resolveConfigDir, readJson, writeJsonAtomic, mountAppearanceRoutes } from './config.js';
-import { init } from './init.js';
+import { init, hooksInstalled } from './init.js';
 import { pickFolder, openClaudeTerminal, runCommand } from './macos.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -339,7 +339,8 @@ export async function startHub({
       addedAt: entry.addedAt, lastOpened: entry.lastOpened,
       state: r.state, error: r.error || null, pid: r.pid || null, notice: r.notice || null,
       missing: !fs.existsSync(entry.path),
-      claude: { setup: claude.setup, problem: claude.problem || null },
+      // outdated: set up by an older Margin, without the notification hooks (init adds them).
+      claude: { setup: claude.setup, problem: claude.problem || null, outdated: claude.setup && !hooksInstalled(entry.path) },
     };
   }
   const list = () => [...registry.projects]
