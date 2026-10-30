@@ -3,6 +3,9 @@ name: macOS app
 on:
   push:
   pull_request:
+  # Publishing a GitHub release builds the app from the release's tag and attaches it.
+  release:
+    types: [published]
 
 jobs:
   # Builds Margin.app (mac/), checks the bundle, runs the app's own smoke test, and uploads the
@@ -11,6 +14,8 @@ jobs:
     name: Build and smoke-test Margin.app
     runs-on: macos-15
     timeout-minutes: 40
+    permissions:
+      contents: write # only used to attach Margin-<version>.zip to a published release
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -52,6 +57,14 @@ jobs:
           name: Margin-app
           path: mac/dist/Margin.zip
           if-no-files-found: warn
+      - name: Attach the app to the release
+        if: github.event_name == 'release' && success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          cp mac/dist/Margin.zip "Margin-${TAG#v}.zip"
+          gh release upload "$TAG" "Margin-${TAG#v}.zip" --clobber --repo "$GITHUB_REPOSITORY"
       # Annotations on the commit, so a failure can be read without downloading the logs: the
       # Swift compiler's errors, then the end of each step's output that failed.
       - name: Summarise a failure
