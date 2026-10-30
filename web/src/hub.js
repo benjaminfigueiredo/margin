@@ -4,6 +4,7 @@
 // new window). The hub never talks to a paper's server from the browser: papers are other origins.
 import { api, $, h, toast } from './util.js';
 import { THEMES } from '../../server/appearance.js';
+import { appHost, postToApp } from './notify.js';
 
 const POLL_MS = 2000;
 const state = { hub: null, papers: [], fresh: null, lastJson: '' };
@@ -63,7 +64,16 @@ function paperRow(p) {
   if (running) actions.push(h('button', { class: 'btn sm stop', onclick: () => stop(p) }, 'Stop'));
   if (p.state === 'error') actions.push(h('button', { class: 'btn sm restart', onclick: () => start(p) }, 'Restart'));
   if (!p.claude.setup && !p.missing) actions.push(h('button', { class: 'btn sm setup-claude', title: 'Run margin init on this folder, so Claude Code there connects to this paper', onclick: () => setupClaude(p) }, 'Set up for Claude'));
-  if (running && p.claude.setup && state.hub?.platform === 'darwin') actions.push(h('button', { class: 'btn sm ghost terminal', title: 'Open Terminal in the paper folder and run claude', onclick: () => terminal(p) }, 'Claude terminal'));
+  else if (p.claude.outdated && !p.missing) actions.push(h('button', { class: 'btn sm setup-claude', title: 'Run margin init again: adds the hooks that tell Margin when Claude is done or needs you (for notifications). Your own settings and hooks are kept.', onclick: () => setupClaude(p) }, 'Update for Claude'));
+  if (running && p.claude.setup && state.hub?.platform === 'darwin') {
+    // In the Mac app: the app puts this paper's window above a Terminal running claude (one click).
+    const inApp = !!appHost();
+    actions.push(h('button', {
+      class: 'btn sm ghost terminal',
+      title: inApp ? 'Put this paper on the top of the screen and Terminal running claude in a strip below it' : 'Open Terminal in the paper folder and run claude',
+      onclick: () => (inApp ? postToApp({ type: 'splitWithClaude', paper: p.id }) : terminal(p)),
+    }, 'Claude terminal'));
+  }
   actions.push(h('button', { class: 'btn sm ghost danger remove', title: 'Remove from this list (the files stay)', onclick: () => remove(p) }, 'Remove'));
 
   const msgs = [];

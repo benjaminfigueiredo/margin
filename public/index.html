@@ -60,6 +60,10 @@
             </div>
             <span class="fine">Split screen packs Margin into a short window above your Claude terminal. Auto uses it when the window is 660 px tall or less.</span>
           </div>
+          <div class="field"><span>Notifications</span>
+            <label id="notify-label" class="check"><input type="checkbox" id="set-notify"> Notify me when Claude is done or needs me</label>
+            <span id="notify-hint" class="fine">Only while this page is in the background. Also when Overleaf has new commits.</span>
+          </div>
           <p id="settings-where" class="fine">Saved in this browser, not in the paper.</p>
         </div>
       </div>
@@ -249,6 +253,7 @@
     <span id="conn" class="dot off" title="Connecting…"></span>
     <span id="git-status"></span>
     <button id="claude-status" class="claude-status off" type="button">Claude</button>
+    <button id="btn-split-claude" class="wc-btn hidden" type="button" title="Put this window on the top of the screen and Terminal running claude in a strip below it">Claude terminal</button>
     <span class="spacer"></span>
     <span id="wc-sel" class="hidden"></span>
     <button id="wc-btn" class="wc-btn" title="Word count" aria-expanded="false">– words</button>

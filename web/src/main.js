@@ -11,6 +11,7 @@ import { createSearch } from './search.js';
 import { createResponsePanel } from './response.js';
 import { createContextPanel } from './context.js';
 import { initAsk } from './ask.js';
+import { initNotify, appHost, postToApp } from './notify.js';
 import { createChanges } from './changes.js';
 import { region, merge3, sameText } from './merge.js';
 
@@ -42,6 +43,7 @@ const editor = createEditor($('#editor'), {
 
 initWordCount(editor);
 initSettings(editor);
+const notifier = initNotify({ getName: () => state.project?.name || 'Margin' });
 
 // ---------- outline ----------
 const outline = createOutline($('#outline'), {
@@ -833,7 +835,8 @@ function connect() {
           applyReviewToEditor();
         }
         break;
-      case 'git-changed': changes.refreshSoon(); onGitChanged(msg); break;
+      case 'git-changed': changes.refreshSoon(); onGitChanged(msg); notifier.gitChanged(msg); break;
+      case 'claude-event': notifier.claudeEvent(msg); break;
       case 'compile-start': onCompileStart(msg.by); break;
       case 'claude-activity': ask.onActivity(msg); break;
       case 'compile-done': await onCompileDone(msg); break;
@@ -855,6 +858,11 @@ async function boot() {
   $('#project-name').textContent = state.project.name;
   // Started from the hub: a plain link back to it (another origin, so no requests to it from here).
   if (state.project.hub) { $('#hub-link').href = state.project.hub; $('#hub-link').classList.remove('hidden'); }
+  // In the Mac app: one click puts this window above Terminal running claude in the paper folder.
+  if (appHost()) {
+    $('#btn-split-claude').classList.remove('hidden');
+    $('#btn-split-claude').addEventListener('click', () => postToApp({ type: 'splitWithClaude' }));
+  }
   $('#main-file').textContent = state.project.main;
   setPdfDownloadName();
   $('#set-engine').value = state.project.settings.engine;
