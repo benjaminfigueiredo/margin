@@ -24,7 +24,8 @@ same "LSMinimumSystemVersion" "$(key LSMinimumSystemVersion)" 13.0
 same "opens folders (CFBundleDocumentTypes)" "$(key CFBundleDocumentTypes.0.LSItemContentTypes.0)" public.folder
 same "never the default app for folders (LSHandlerRank)" "$(key CFBundleDocumentTypes.0.LSHandlerRank)" Alternate
 check "NSAppleEventsUsageDescription" test -n "$(key NSAppleEventsUsageDescription)"
-version="$(node -p 'require(process.argv[1]).version' "$res/package.json" 2>/dev/null || true)"
+# Read the file (require() would take a relative path such as mac/dist/... for a package name).
+version="$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).version' "$res/package.json" 2>/dev/null || true)"
 same "version (as package.json)" "$(key CFBundleShortVersionString)" "${version:-missing}"
 
 check "the executable is executable" test -x "$app/Contents/MacOS/Margin"
