@@ -1,0 +1,135 @@
+name: macOS app
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  # Builds Margin.app (mac/), checks the bundle, runs the app's own smoke test, and uploads the
+  # app as an artifact. The API and Chromium UI tests run on Linux (test.yml).
+  app:
+    name: Build and smoke-test Margin.app
+    runs-on: macos-15
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # No `npm ci` at the root on purpose: the bundle must work with the production
+      # dependencies build-app.sh installs into it, and a root node_modules would hide a missing
+      # one (Node looks for packages in parent folders too).
+      - name: Toolchain
+        run: |
+          sw_vers
+          xcodebuild -version
+          swift --version
+          node --version
+      - name: Build Margin.app
+        id: build
+        run: |
+          set -o pipefail
+          mac/build-app.sh --universal 2>&1 | tee build-output.txt
+      - name: Check the bundle
+        id: check
+        run: |
+          set -o pipefail
+          mac/check-app.sh mac/dist/Margin.app 2>&1 | tee check-output.txt
+      # The app starts its own hub (port 47242, temporary config), opens the sample paper, quits
+      # through the normal quit path and checks the hub is gone. It gives up by itself after 300 s.
+      - name: Smoke test
+        id: smoke
+        timeout-minutes: 8
+        env:
+          MARGIN_SMOKE_PAPER: ${{ github.workspace }}/examples/sample-paper
+        run: |
+          set -o pipefail
+          mac/dist/Margin.app/Contents/MacOS/Margin --smoke-test 2>&1 | tee smoke-output.txt
+      - name: Upload Margin.zip
+        if: always() && steps.build.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Margin-app
+          path: mac/dist/Margin.zip
+          if-no-files-found: warn
+      # Annotations on the commit, so a failure can be read without downloading the logs: the
+      # Swift compiler's errors, then the end of each step's output that failed.
+      - name: Summarise a failure
+        if: failure() || cancelled()
+        env:
+          BUILD: ${{ steps.build.outcome }}
+          CHECK: ${{ steps.check.outcome }}
+          SMOKE: ${{ steps.smoke.outcome }}
+        run: |
+          enc() { sed 's/%/%25/g; s/\r//g' | awk 'BEGIN{ORS="%0A"} {print}'; }
+          if [ "$BUILD" = failure ] && [ -s build-output.txt ]; then
+            errors="$(grep -E '(error|fatal error):' build-output.txt | cut -c1-400 | awk '!seen[$0]++' | head -n 40 || true)"
+            if [ -n "$errors" ]; then echo "::error title=Swift build errors::$(printf '%s\n' "$errors" | enc)"; fi
+          fi
+          for step in build check smoke; do
+            outcome="$(printenv "$(echo "$step" | tr '[:lower:]' '[:upper:]')" || true)"
+            case "$outcome" in failure|cancelled) ;; *) continue ;; esac
+            [ -s "$step-output.txt" ] || continue
+            echo "::error title=macOS app: $step $outcome (last 80 lines)::$(tail -n 80 "$step-output.txt" | enc)"
+          done
+
+  # Informational: the Playwright UI suite in WebKit (Safari's engine, which the Mac app uses), to
+  # learn where Margin breaks there. Never blocks a merge.
+  webkit:
+    name: UI tests in WebKit (informational)
+    runs-on: macos-15
+    continue-on-error: true
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # BasicTeX plus what the tests use. If this fails (or is too slow), the specs that compile
+      # are skipped below and a warning says so.
+      - name: Install TeX (BasicTeX, latexmk, latexdiff)
+        id: tex
+        continue-on-error: true
+        timeout-minutes: 20
+        run: |
+          set -o pipefail
+          {
+            brew install --cask basictex
+            export PATH="/Library/TeX/texbin:$PATH"
+            # sudo resets PATH, hence tlmgr's full path.
+            sudo /Library/TeX/texbin/tlmgr update --self
+            sudo /Library/TeX/texbin/tlmgr install latexmk latexdiff synctex ulem natbib
+            echo "/Library/TeX/texbin" >> "$GITHUB_PATH"
+            for t in latexmk bibtex synctex latexdiff pdflatex; do command -v "$t"; done
+          } 2>&1 | tee tex-output.txt
+      - name: Install Playwright's WebKit
+        run: npx playwright install webkit
+      - name: UI tests in WebKit
+        id: ui
+        env:
+          MARGIN_PW_WEBKIT: '1'
+          TEX: ${{ steps.tex.outcome }}
+        run: |
+          set -o pipefail
+          specs=""
+          if [ "$TEX" != success ]; then
+            specs="$(grep -L -E 'compile|pdf' test/ui/*.spec.mjs | tr '\n' ' ')"
+            echo "::warning title=WebKit UI tests without TeX::TeX could not be installed, so only the specs that never compile ran: $specs"
+          fi
+          # shellcheck disable=SC2086
+          npx playwright test --project=webkit $specs 2>&1 | tee webkit-output.txt
+      - name: Summarise a failure
+        if: failure() || cancelled() || steps.tex.outcome == 'failure'
+        env:
+          TEX: ${{ steps.tex.outcome }}
+          UI: ${{ steps.ui.outcome }}
+        run: |
+          enc() { sed 's/%/%25/g; s/\r//g' | awk 'BEGIN{ORS="%0A"} {print}'; }
+          if [ "$TEX" = failure ] && [ -s tex-output.txt ]; then
+            echo "::warning title=TeX install failed (last 40 lines)::$(tail -n 40 tex-output.txt | enc)"
+          fi
+          if [ "$UI" != success ] && [ -s webkit-output.txt ]; then
+            echo "::error title=WebKit UI tests (last 80 lines)::$(tail -n 80 webkit-output.txt | enc)"
+          fi
