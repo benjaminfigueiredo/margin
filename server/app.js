@@ -236,12 +236,14 @@ export async function startServer({ root, port = 4242, main, engine, configDir, 
   app.get('/pdf', (req, res) => {
     if (!fs.existsSync(project.pdfPath)) return res.status(404).send('No PDF yet');
     res.set('Cache-Control', 'no-store');
+    res.set('Content-Disposition', inlineName(path.basename(project.pdfPath))); // inline: the viewer shows it; the name is what Download saves
     res.sendFile(project.pdfPath, { dotfiles: 'allow' }); // .margin-build is a dot-folder
   });
   // The latexdiff build lives in its own folder; the real PDF above is never replaced by it.
   app.get('/pdf-diff', (req, res) => {
     if (!fs.existsSync(latexdiff.diffPdfPath(project))) return res.status(404).send('No diff PDF yet');
     res.set('Cache-Control', 'no-store');
+    res.set('Content-Disposition', inlineName(`${path.basename(project.pdfPath, '.pdf')}-diff.pdf`));
     res.sendFile(latexdiff.diffPdfPath(project), { dotfiles: 'allow' });
   });
   app.use(express.static(PUBLIC, { index: 'index.html' }));
@@ -326,6 +328,12 @@ export async function startServer({ root, port = 4242, main, engine, configDir, 
   // 127.0.0.1, and ::1 as well when the machine has IPv6 (macOS may resolve localhost to it first).
   const { server, server6 } = await listenLoopback(app, port, { onUpgrade });
   return { server, project, review, gitPoll, gitTimerActive: () => gitTimer !== null, close: async () => { clearInterval(gitTimer); claude.close(); gitTimer = null; await watcher.close(); wss.close(); server.close(); server6.close(); } };
+}
+
+// Content-Disposition for a file the browser shows itself but should save under `name`.
+function inlineName(name) {
+  const plain = name.replace(/[^\x20-\x7e]|["\\%;]/g, '_');
+  return `inline; filename="${plain}"${plain === name ? '' : `; filename*=UTF-8''${encodeURIComponent(name)}`}`;
 }
 
 function summarize(r) {

@@ -304,7 +304,7 @@ export function createChanges(root, { bar, downloadLink, getMain, saveIfDirty, o
     bar.classList.add('hidden');
     $('#pdf-pane').classList.remove('diff-mode');
     downloadLink.href = '/pdf';
-    downloadLink.setAttribute('download', '');
+    downloadLink.setAttribute('download', `${(getMain?.() || 'paper').replace(/\.tex$/, '').split('/').pop()}.pdf`);
     downloadLink.title = 'Download PDF';
     return true;
   }

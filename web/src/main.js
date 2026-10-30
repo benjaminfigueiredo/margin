@@ -466,12 +466,19 @@ document.addEventListener('click', (e) => { if (!e.target.closest('#compile-menu
 $('#set-engine').addEventListener('change', (e) => updateSettings({ engine: e.target.value }));
 $('#set-auto').addEventListener('change', (e) => updateSettings({ autoCompile: e.target.checked }));
 $('#set-main').addEventListener('change', (e) => updateSettings({ main: e.target.value }));
+// The Download link names the file after the main document (Safari and the Mac app would otherwise
+// offer "pdf"). Left alone while the diff PDF is showing: changes.js names that one.
+function setPdfDownloadName() {
+  const a = $('#pdf-pane a[download]');
+  if (a.getAttribute('href') === '/pdf') a.setAttribute('download', `${state.project.main.replace(/\.tex$/, '').split('/').pop()}.pdf`);
+}
 async function updateSettings(body) {
   try {
     const r = await api('/settings', { method: 'PUT', body });
     state.project.settings = r.settings;
     state.project.main = r.main;
     $('#main-file').textContent = r.main;
+    setPdfDownloadName();
     renderTree();
   } catch (e) { toast(e.message, 'error'); }
 }
@@ -631,6 +638,7 @@ async function boot() {
   // Started from the hub: a plain link back to it (another origin, so no requests to it from here).
   if (state.project.hub) { $('#hub-link').href = state.project.hub; $('#hub-link').classList.remove('hidden'); }
   $('#main-file').textContent = state.project.main;
+  setPdfDownloadName();
   $('#set-engine').value = state.project.settings.engine;
   $('#set-auto').checked = !!state.project.settings.autoCompile;
   if (store.get('margin:review-hidden')) { $('#review').classList.add('collapsed'); $('#btn-review').classList.remove('active'); }

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Fix: Download PDF saved the file as "pdf" in Safari and the Mac app. It is now named after the
+  main document (`main.pdf`); the viewer still shows the PDF inline.
 - Fix: when the paper folder is a subfolder of its git repository, the Sync confirmation, the
   conflict messages and the incoming-changes list named files relative to the repository instead
   of the paper folder, and a conflict there could not be resolved by Sync. Sync now also commits

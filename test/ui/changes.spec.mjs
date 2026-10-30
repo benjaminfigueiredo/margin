@@ -216,6 +216,7 @@ test('the diff PDF is shown with an obvious DIFF bar, survives a recompile, and 
   await expect(bar).toBeHidden();
   await expect(page.locator('#pdf-pane')).not.toHaveClass(/diff-mode/);
   await expect(page.locator('.pdf-head a[download]')).toHaveAttribute('href', '/pdf');
+  await expect(page.locator('.pdf-head a[download]')).toHaveAttribute('download', 'main.pdf');
   await expect(page.locator('#pdf-pages .pdf-page').first()).toBeVisible();
   expect(asked.some((u) => /\/pdf\?/.test(u)), 'Back loaded the normal PDF').toBe(true);
 });

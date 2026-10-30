@@ -79,6 +79,13 @@ let r = await call('compile');
 console.log(r.text);
 assert.match(r.text, /missingref2020/);
 assert.match(r.text, /sec:result/);
+{
+  // the PDF is shown inline (the viewer needs that) but saved under the document's name
+  const res = await fetch(`${base}/pdf`);
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get('content-disposition'), 'inline; filename="main.pdf"');
+  assert.equal(res.headers.get('content-type'), 'application/pdf');
+}
 
 step('check_citations');
 r = await call('check_citations');

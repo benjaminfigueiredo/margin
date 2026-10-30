@@ -23,6 +23,8 @@ test('boot: tree, editor, connection dot, first PDF page', async ({ page }) => {
   await expect(page.locator('#current-file')).toHaveText('main.tex');
   await expect(editorText(page)).toContainText('Thermal Tolerance of Coastal Copepods');
   await expect(page.locator('#conn')).toHaveClass(/\bon\b/);
+  // Safari and the Mac app name a download after the link, so it must not be left empty
+  await expect(page.locator('.pdf-head a[download]')).toHaveAttribute('download', 'main.pdf');
   const canvas = page.locator('#pdf-pages .pdf-page[data-page="1"] canvas');
   await expect(canvas).toBeVisible();
   // The PDF pane replaces every page element after each compile (pdfview buildPages),
