@@ -95,14 +95,14 @@
         <div class="seg rail-mode" role="group" aria-label="Review panel view">
           <button type="button" data-rail="review" class="on" title="Suggestions and comments">Review</button>
           <button type="button" data-rail="response" title="Point-by-point response to the referees">Response <span id="response-badge" class="rail-badge hidden"></span></button>
+          <button type="button" data-rail="context" title="Your private notes, discussions and drafts for Claude (stay on this computer)">Context <span id="context-count" class="rail-count hidden"></span></button>
         </div>
-        <span class="spacer"></span>
+      </div>
+      <div class="review-sub">
         <div class="seg review-only">
           <button data-scope="file" class="on">This file</button>
           <button data-scope="all">All</button>
         </div>
-      </div>
-      <div class="review-sub">
         <label class="check"><input type="checkbox" id="show-closed"> Show closed</label>
         <div id="bulk" class="bulk"></div>
       </div>
@@ -133,6 +133,7 @@
       </div>
       <div id="cards" class="cards"></div>
       <div id="response" class="response hidden"></div>
+      <div id="context" class="context hidden" role="region" aria-label="Private context"></div>
     </aside>
 
     <div id="splitter" class="splitter" role="separator" aria-orientation="vertical" title="Drag to resize"></div>

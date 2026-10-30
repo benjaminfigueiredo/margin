@@ -47,10 +47,10 @@ const skeleton = (path, label) => [
   '\\end{figure}',
 ].join('\n');
 
-const hasFiles = (e) => [...(e.dataTransfer?.types || [])].includes('Files');
+export const hasFiles = (e) => [...(e.dataTransfer?.types || [])].includes('Files');
 
 // Files from a drop, read synchronously (the data is gone once the event returns). Folders are skipped.
-function takeFiles(e) {
+export function takeFiles(e) {
   const out = [];
   let dirs = 0;
   const items = e.dataTransfer.items;
@@ -67,7 +67,7 @@ function takeFiles(e) {
 }
 
 // Modal confirmation. Resolves true only for the confirm button; Escape and Cancel resolve false.
-function confirmDialog({ title, lines = [], names = [], confirmLabel, danger = true }) {
+export function confirmDialog({ title, lines = [], names = [], confirmLabel, danger = true }) {
   return new Promise((resolve) => {
     const dlg = h('dialog', { class: 'dialog', 'aria-label': title },
       h('form', { method: 'dialog' },

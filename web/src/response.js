@@ -6,9 +6,6 @@ import { api, h, toast, wordDiff } from './util.js';
 
 const STANCES = [['agree', 'Agree'], ['partly_agree', 'Partly agree'], ['disagree', 'Disagree'], ['clarify', 'Clarify']];
 const STATUS_LABEL = { done: 'Done', pending: 'Pending', mismatch: 'Mismatch' };
-const RAIL_KEY = 'margin:rail';
-const read = (k) => { try { return localStorage.getItem(k); } catch { return null; } };
-const write = (k, v) => { try { localStorage.setItem(k, v); } catch { /* this page only */ } };
 
 export function createResponsePanel(rail, { onJump, onChanged, saveIfDirty }) {
   const root = rail.querySelector('#response');
@@ -213,18 +210,6 @@ export function createResponsePanel(rail, { onJump, onChanged, saveIfDirty }) {
     if (round && !view.rounds.includes(round)) { round = null; return refresh(); }
     render();
   }
-
-  // ---------- Review / Response switch ----------
-  function setMode(mode) {
-    const on = mode === 'response';
-    rail.classList.toggle('response-mode', on);
-    root.classList.toggle('hidden', !on);
-    rail.querySelectorAll('[data-rail]').forEach((b) => b.classList.toggle('on', b.dataset.rail === mode));
-    write(RAIL_KEY, mode);
-    if (on) refresh();
-  }
-  rail.querySelectorAll('[data-rail]').forEach((b) => b.addEventListener('click', () => setMode(b.dataset.rail)));
-  if (read(RAIL_KEY) === 'response') setMode('response');
 
   return { refresh };
 }

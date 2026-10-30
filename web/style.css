@@ -484,6 +484,50 @@ details summary { cursor: pointer; color: var(--ink-2); margin: 8px 0 4px; }
 @media (max-width: 1100px) { .review-pane.response-mode { width: 330px; } }
 .resp-export { display: inline-flex; align-items: center; gap: 0; }
 .resp-export .fine { margin-right: 2px; }
+/* ---------- private context (web/src/context.js) ---------- */
+/* A third view in the review rail. Existing colour tokens only, so both themes work. */
+.review-pane.context-mode { width: 340px; }
+.review-pane.context-mode .review-only,
+.review-pane.context-mode .review-sub,
+.review-pane.context-mode #cards { display: none; }
+.rail-count { background: var(--hover-strong); color: var(--ink-2); border-radius: 8px; padding: 0 5px; font-size: 10px; font-weight: 600; line-height: 15px; }
+.rail-mode button.on .rail-count { background: rgba(127,127,127,.35); color: inherit; }
+.context { flex: 1; min-height: 0; display: flex; flex-direction: column; position: relative; outline: none; }
+.context.drop-over { box-shadow: inset 0 0 0 2px var(--accent); }
+.context.drop-over::after { content: "Drop to keep as private context"; white-space: nowrap; position: absolute; top: 46px; left: 50%; transform: translateX(-50%); z-index: 5; padding: 5px 12px; border-radius: 14px; background: var(--accent); color: white; font-size: 12px; pointer-events: none; }
+.cx-bar { display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.cx-note { margin: 10px 10px 0; padding: 10px; background: var(--paper); border: 1px solid var(--line); border-left: 3px solid var(--you); border-radius: 8px; display: grid; gap: 8px; }
+.cx-note-title { border: 1px solid var(--line-strong); border-radius: 5px; padding: 4px 7px; background: var(--paper); color: var(--ink); font-weight: 600; min-width: 0; }
+.cx-note-title:focus { outline: none; border-color: var(--accent); }
+.cx-list { overflow: auto; flex: 1; padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+.cx-item { background: var(--paper); border: 1px solid var(--line); border-left: 3px solid var(--line-strong); border-radius: 8px; padding: 8px 10px; display: grid; gap: 5px; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
+.cx-item.pdf { border-left-color: var(--danger); }
+.cx-item.md { border-left-color: var(--you); }
+.cx-item.txt { border-left-color: var(--muted); }
+.cx-item-head { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.cx-type { flex: none; font-size: 9.5px; font-weight: 700; letter-spacing: .03em; padding: 1px 5px; border-radius: 4px; background: var(--gutter); color: var(--ink-2); font-family: var(--mono); }
+.cx-type.pdf { background: var(--danger-soft); color: var(--danger); }
+.cx-type.md { background: var(--you-soft); color: var(--you); }
+.cx-name { flex: 1; min-width: 0; font-weight: 600; color: var(--ink); text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cx-name:hover { text-decoration: underline; }
+.cx-meta { display: flex; gap: 8px; flex-wrap: wrap; font-size: 11px; color: var(--muted); }
+.cx-by-claude { color: var(--claude); font-weight: 600; }
+.cx-desc { font-size: 12.5px; line-height: 1.45; color: var(--ink); white-space: pre-wrap; word-break: break-word; border-radius: 5px; padding: 2px 4px; margin: 0 -4px; cursor: text; }
+.cx-desc:hover, .cx-desc:focus-visible { background: var(--hover); outline: none; }
+.cx-desc.blank { color: var(--muted); font-style: italic; }
+.cx-desc-edit { font-size: 12.5px; }
+.cx-actions { display: flex; align-items: center; gap: 2px; margin: 0 -6px -3px; }
+.cx-actions .btn { text-decoration: none; }
+.cx-skipped { margin: 0; padding: 4px 10px; color: var(--warn); word-break: break-word; }
+.cx-foot { margin: 0; padding: 6px 10px; border-top: 1px solid var(--line); line-height: 1.4; }
+@media (max-width: 1100px) { .review-pane.context-mode { width: 300px; } }
+:root[data-layout="split"] .cx-bar { padding: 3px 8px; }
+:root[data-layout="split"] .cx-list { padding: 6px; gap: 6px; }
+:root[data-layout="split"] .cx-item { padding: 6px 8px; gap: 3px; }
+:root[data-layout="split"] .cx-note { margin: 6px 6px 0; padding: 7px 8px; gap: 5px; }
+:root[data-layout="split"] .cx-note textarea { min-height: 40px; }
+:root[data-layout="split"] .cx-foot { display: none; }
+:root[data-layout="split"] .context.drop-over::after { top: 36px; }
 /* ---------- Ask Claude (web/src/ask.js) ---------- */
 #settings-menu { width: 280px; }
 /* The editor header now holds three buttons. Keep a narrow editor pane from widening the page

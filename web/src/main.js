@@ -6,9 +6,10 @@ import { createReviewPanel } from './review.js';
 import { initWordCount } from './wordcount.js';
 import { createOutline } from './outline.js';
 import { initSettings } from './settings.js';
-import { createFiles } from './files.js';
+import { createFiles, hasFiles } from './files.js';
 import { createSearch } from './search.js';
 import { createResponsePanel } from './response.js';
+import { createContextPanel } from './context.js';
 import { initAsk } from './ask.js';
 import { createChanges } from './changes.js';
 import { region, merge3, sameText } from './merge.js';
@@ -419,6 +420,32 @@ const response = createResponsePanel($('#review'), {
   onChanged: async () => { await syncFromDisk(); await refreshReview(); },
   saveIfDirty: () => saveFirst(),
 });
+// Private context for Claude: a third view in the review rail (web/src/context.js).
+const context = createContextPanel($('#review'));
+
+// The rail's views: Review (the cards), Response and Context. The last one shown is remembered.
+const RAIL_VIEWS = ['review', 'response', 'context'];
+function setRail(view) {
+  if (!RAIL_VIEWS.includes(view)) view = 'review';
+  const rail = $('#review');
+  rail.classList.toggle('response-mode', view === 'response');
+  rail.classList.toggle('context-mode', view === 'context');
+  $('#response').classList.toggle('hidden', view !== 'response');
+  $('#context').classList.toggle('hidden', view !== 'context');
+  $$('[data-rail]', rail).forEach((b) => b.classList.toggle('on', b.dataset.rail === view));
+  store.set('margin:rail', view);
+  if (view === 'response') response.refresh();
+  if (view === 'context') context.refresh();
+}
+$$('#review [data-rail]').forEach((b) => b.addEventListener('click', () => setRail(b.dataset.rail)));
+setRail(store.get('margin:rail'));
+
+// A file dropped where nothing takes it (the top bar, the PDF, a pane header) would make the browser
+// show that file in place of Margin. The file tree, the editor and the Context view take drops and
+// say so first (defaultPrevented); anywhere else a drop is simply not allowed.
+window.addEventListener('dragover', (e) => { if (!e.defaultPrevented && hasFiles(e)) { e.preventDefault(); e.dataTransfer.dropEffect = 'none'; } });
+window.addEventListener('drop', (e) => { if (!e.defaultPrevented && hasFiles(e)) e.preventDefault(); });
+
 async function jumpToLink(link) {
   const it = review.items.find((x) => x.id === link.id);
   if (it && it.status === 'open' && it.from != null) return focusItem(it);
@@ -795,6 +822,7 @@ function connect() {
     switch (msg.type) {
       case 'review-changed': changes.refreshSoon(); await refreshReview(); break;
       case 'responses-changed': response.refresh(); break;
+      case 'context-changed': context.refresh(); break;
       case 'tree-changed': changes.refreshSoon(); await loadTree(); refreshGit(); break;
       case 'file-changed':
         refreshGit();
@@ -834,6 +862,7 @@ async function boot() {
   if (store.get('margin:review-hidden')) { $('#review').classList.add('collapsed'); $('#btn-review').classList.remove('active'); }
   await loadTree();
   await refreshReview();
+  context.refresh(); // the count on the Context tab
   const remembered = store.get(`margin:${state.project.root}:file`);
   const start = state.tree.some((e) => e.path === remembered) ? remembered : state.project.main;
   if (state.tree.some((e) => e.path === start)) await openFile(start);
