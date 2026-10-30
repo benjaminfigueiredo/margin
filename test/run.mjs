@@ -853,7 +853,27 @@ step('project search and replace: literal, regex, case, whole word, 400s, cap, l
   assert.match((await rest(`/review/${sug.id}/accept`, { method: 'POST', body: {} })).error, /no longer in the file/);
   for (const id of [sug.id, com.id]) await rest(`/review/${id}`, { method: 'DELETE' });
 
-  for (const f of ['scratch-a.tex', 'scratch-b.tex']) fs.rmSync(path.join(tmp, 'paper', f), { force: true });
+  // a catastrophic regex gets a clear 400 after the time limit instead of hanging the server
+  await put('scratch-c.tex', 'a'.repeat(45) + 'b\n');
+  for (const [kind, url, opts] of [
+    ['search', `/search?${new URLSearchParams({ q: '(a+)+$', regex: '1' })}`, {}],
+    ['replace', '/replace', { method: 'POST', body: { q: '(a+)+$', regex: true, replacement: 'x', files: ['scratch-c.tex'] } }],
+  ]) {
+    const t0 = Date.now();
+    const res = await fetch(`${base}/api${url}`, { method: opts.method || 'GET', headers: { 'Content-Type': 'application/json' }, body: opts.body ? JSON.stringify(opts.body) : undefined });
+    assert.equal(res.status, 400, kind);
+    assert.match((await res.json()).error, /took too long/, kind);
+    assert.ok(Date.now() - t0 < 8000, `${kind} gave up in ${Date.now() - t0} ms`);
+  }
+  assert.equal(readP('scratch-c.tex'), 'a'.repeat(45) + 'b\n', 'a refused replace changes nothing');
+  assert.equal((await q({ q: 'a+b', regex: '1' })).files.find((f) => f.path === 'scratch-c.tex').count, 1, 'sane regexes still work after a timeout');
+  {
+    const t0 = Date.now();
+    for (let i = 0; i < 20; i++) await q({ q: 'heatwave' });
+    console.log(`20 plain searches: ${Date.now() - t0} ms`);
+  }
+
+  for (const f of ['scratch-a.tex', 'scratch-b.tex', 'scratch-c.tex']) fs.rmSync(path.join(tmp, 'paper', f), { force: true });
 }
 
 step('watcher: self-write suppression compares content, not time');

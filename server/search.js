@@ -1,9 +1,12 @@
 // Project-wide find and replace. Search never writes. Replace only touches files (or
 // individual matches) the caller names explicitly, so the UI has to show what it is about to
 // do; there is no "replace everywhere" from a query alone. Writes go through Project.write.
+import vm from 'node:vm';
+
 const MAX_SHOWN = 2000;        // matches returned in detail
 const MAX_FILE_BYTES = 5e6;    // bigger "text" files (data dumps) are skipped
 const LINE_CAP = 300;          // characters of context returned per match
+const TIME_LIMIT_MS = 3000;    // for all the matching in one search or replace request
 
 // Throws Error(message) for an empty query or an invalid regex; the API turns that into a 400.
 export function buildRegex({ q, regex = false, caseSensitive = false, whole = false }) {
@@ -13,15 +16,32 @@ export function buildRegex({ q, regex = false, caseSensitive = false, whole = fa
   try { return new RegExp(src, caseSensitive ? 'gm' : 'gim'); } catch (e) { throw new Error(`Invalid regular expression: ${e.message}`); }
 }
 
-// Every non-empty match in text, in order. Empty matches (e.g. /a*/) are skipped: replacing
-// them would insert text between every character.
-function scan(text, re, onMatch) {
+// A regular expression a user typed can backtrack catastrophically (e.g. (a+)+$ on a long line)
+// and the server is a single thread. The matching loop therefore runs in a vm script, which V8
+// can interrupt at a deadline; the whole request shares one budget.
+const sandbox = vm.createContext({});
+const loop = new vm.Script(`(() => {
+  const re = globalThis.RE, text = globalThis.TEXT, cb = globalThis.CB;
   re.lastIndex = 0;
   let m;
   while ((m = re.exec(text)) !== null) {
     if (m[0].length === 0) { re.lastIndex++; continue; }
-    if (onMatch(m) === false) break;
+    if (cb(m) === false) break;
   }
+})()`);
+export const TOO_SLOW = 'The expression took too long to match (it backtracks too much). Simplify it, or use a plain-text search.';
+export function newBudget() { return { deadline: Date.now() + TIME_LIMIT_MS }; }
+
+// Every non-empty match in text, in order. Empty matches (e.g. /a*/) are skipped: replacing
+// them would insert text between every character. Throws Error(TOO_SLOW) past the budget.
+function scan(text, re, onMatch, budget) {
+  const left = budget.deadline - Date.now();
+  if (left <= 0) throw new Error(TOO_SLOW);
+  Object.assign(sandbox, { RE: re, TEXT: text, CB: onMatch });
+  try { loop.runInContext(sandbox, { timeout: left }); } catch (e) {
+    if (e?.code === 'ERR_SCRIPT_EXECUTION_TIMEOUT') throw new Error(TOO_SLOW);
+    throw e;
+  } finally { sandbox.RE = sandbox.TEXT = sandbox.CB = null; }
 }
 
 function lineIndex(text) {
@@ -46,6 +66,7 @@ function searchable(project) {
 
 export function search(project, query) {
   const re = buildRegex(query);
+  const budget = newBudget();
   const files = [];
   let total = 0, shown = 0;
   for (const rel of searchable(project)) {
@@ -71,7 +92,7 @@ export function search(project, query) {
       matches.push({ from: m.index, to: m.index + m[0].length, line: ln + 1, column, length: m[0].length, text: lineText, textOffset: shift, match: m[0].slice(0, 200) });
       shown++;
       return true;
-    });
+    }, budget);
     if (count) files.push({ path: rel, count, matches });
   }
   return { query: { q: query.q, regex: !!query.regex, case: !!query.caseSensitive, whole: !!query.whole }, files, total, shown, truncated: total > shown, limit: MAX_SHOWN };
@@ -112,6 +133,7 @@ export function replace(project, review, body) {
     wanted.get(mt.file).add(`${mt.from}:${mt.to}`);
   }
 
+  const budget = newBudget();
   const known = new Set(searchable(project));
   const plans = [];
   for (const [rel, only] of wanted) {
@@ -123,7 +145,7 @@ export function replace(project, review, body) {
       if (only && !only.has(`${m.index}:${m.index + m[0].length}`)) return true;
       spans.push({ from: m.index, to: m.index + m[0].length, with: body.regex ? expand(replacement, m) : replacement });
       return true;
-    });
+    }, budget);
     if (spans.length) plans.push({ rel, text, spans });
   }
 

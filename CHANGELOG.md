@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Fix: a find or replace with a regular expression that backtracks catastrophically (for example
+  `(a+)+$` on a long line) could freeze Margin. Matching now stops after 3 seconds with "The
+  expression took too long to match", and nothing is changed.
 - Fix: `.review/archive.json` (items removed by "clear closed") is now versioned, backed up
   (`.bak`, `.bak2`, `.bak3`) and moved aside if unreadable, like review.json and responses.json.
   Existing archives keep their items.
