@@ -20,6 +20,7 @@ import { ensureLocalOnlyExcluded } from './init.js';
 import { countProject } from './wordcount.js';
 import * as projectSearch from './search.js';
 import { mountResponseRoutes } from './responses.js';
+import { ContextStore, mountContextRoutes } from './context.js';
 import { createClaudeLink } from './asks.js';
 import { changes as projectChanges, acceptedSince } from './changes.js';
 import * as latexdiff from './latexdiff.js';
@@ -48,6 +49,7 @@ export async function startServer({ root, port = 4242, main, engine, configDir, 
   if (!main && config.main) project.main = config.main;
   const settings = { engine: engine || config.engine || 'pdflatex', autoCompile: config.autoCompile ?? false };
   const review = new ReviewStore(project);
+  const context = new ContextStore(project); // the author's private notes for Claude (.review/context/)
   const state = { editor: null, lastCompile: null, compiling: null, diffing: null };
 
   const app = express();
@@ -80,7 +82,7 @@ export async function startServer({ root, port = 4242, main, engine, configDir, 
   };
 
   const claude = createClaudeLink({ review, broadcast });
-  const ctx = { project, review, state, broadcast, compile: runCompile };
+  const ctx = { project, review, context, state, broadcast, compile: runCompile };
   review.on('change', () => broadcast({ type: 'review-changed' }));
 
   // ---------- MCP (stateless Streamable HTTP; one server instance per request) ----------
@@ -103,7 +105,8 @@ export async function startServer({ root, port = 4242, main, engine, configDir, 
   const api = express.Router();
   // Uploads are raw bytes whatever their type (a .json upload must not be parsed as the request body).
   const jsonBody = express.json({ limit: '20mb' });
-  api.use((req, res, next) => (req.path === '/upload' ? next() : jsonBody(req, res, next)));
+  const rawBody = express.raw({ type: () => true, limit: UPLOAD_LIMIT });
+  api.use((req, res, next) => (req.path === '/upload' || req.path === '/context/upload' ? rawBody(req, res, next) : jsonBody(req, res, next)));
   const handle = (fn) => async (req, res) => {
     try { const out = await fn(req, res); if (out !== undefined && !res.headersSent) res.json(out); }
     catch (e) { res.status(e.status || 400).json({ error: e.message || String(e) }); }
@@ -188,7 +191,7 @@ export async function startServer({ root, port = 4242, main, engine, configDir, 
     if (reviewItemsKept) broadcast({ type: 'review-changed' }); // their cards now read "file missing"
     return { ok: true, ...r, reviewItemsKept };
   }));
-  api.post('/upload', express.raw({ type: () => true, limit: UPLOAD_LIMIT }), handle(async (req) => {
+  api.post('/upload', handle(async (req) => {
     const buf = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
     return { ok: true, ...project.writeBinary(String(req.query.path || ''), buf, { overwrite: req.query.overwrite === '1' }) };
   }));
@@ -197,17 +200,20 @@ export async function startServer({ root, port = 4242, main, engine, configDir, 
     const rel = String(req.body?.path || '');
     const abs = project.abs(rel);
     if (!fs.existsSync(abs)) throw new Error(`Not found: ${rel}`);
-    const isDir = fs.statSync(abs).isDirectory();
+    await reveal(abs, fs.statSync(abs).isDirectory());
+    return { ok: true };
+  }));
+  // The path is an argument of the command (argv), never part of a script or a shell line.
+  const reveal = (abs, isDir) => {
     const [cmd, args] = process.platform === 'darwin' ? ['open', isDir ? [abs] : ['-R', abs]]
       : process.platform === 'win32' ? ['explorer.exe', isDir ? [abs] : [`/select,${abs}`]]
       : ['xdg-open', [isDir ? abs : path.dirname(abs)]];
-    await new Promise((resolve, reject) => {
+    return new Promise((resolve, reject) => {
       const child = spawn(cmd, args, { detached: true, stdio: 'ignore' });
-      child.once('error', (e) => reject(new Error(e.code === 'ENOENT' ? `No file manager found to open (${cmd} is not installed). The folder is ${project.root}` : e.message)));
+      child.once('error', (e) => reject(new Error(e.code === 'ENOENT' ? `No file manager found to open (${cmd} is not installed). The folder is ${isDir ? abs : path.dirname(abs)}` : e.message)));
       child.once('spawn', () => { child.unref(); resolve(); });
     });
-    return { ok: true };
-  }));
+  };
   api.get('/raw', (req, res) => {
     try { res.sendFile(project.readPath(String(req.query.path || '')), { dotfiles: 'allow' }); } catch (e) { res.status(400).send(e.message); }
   });
@@ -232,6 +238,7 @@ export async function startServer({ root, port = 4242, main, engine, configDir, 
   api.delete('/review/:id', handle(async (req) => review.remove(req.params.id)));
   api.post('/review/clear-closed', handle(async () => ({ removed: review.clearClosed() })));
   mountResponseRoutes(api, { review, handle, broadcast }); // response to referees
+  mountContextRoutes(app, api, { context, handle, broadcast, reveal, inlineName }); // private context for Claude
 
   api.post('/editor-state', handle(async (req) => { state.editor = { ...req.body, at: Date.now() }; return { ok: true }; }));
 

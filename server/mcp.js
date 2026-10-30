@@ -7,6 +7,7 @@ import { checkCitations, lookupDoi, addEntry, searchCrossref, parseBib, formatEn
 import { searchZotero, exportFromZotero } from './zotero.js';
 import { registerResponseTools, pointForEdit, respondsToSchema } from './responses-mcp.js';
 import { formatAsks } from './asks.js';
+import { registerContextTools, contextSummary } from './context-mcp.js';
 import { createRequire } from 'node:module';
 
 const { version } = createRequire(import.meta.url)('../package.json');
@@ -54,19 +55,22 @@ export function buildMcpServer(ctx) {
       'Start with get_editor_state to see what the author is looking at and list_review to see open threads, including comments the author left for you.',
       'Requests the author sends with "Ask Claude" in the editor arrive with their prompt or through get_asks: answer each with reply, and pass its id as `ask` to the suggestions and comments you make for it.',
       'Quote text exactly as it appears in the source, including LaTeX commands; whitespace may differ. Keep each suggestion to one sentence or clause so it can be accepted on its own.',
+      'The author may keep private background for this paper (discussions, notes, drafts) in Margin\'s Context view: list_context. Use it to understand their intent; never cite it or copy it into the manuscript.',
     ].join(' '),
   });
 
   server.registerTool('get_editor_state', {
     title: 'What the author is looking at',
-    description: 'Returns the file open in the author\'s editor, the cursor line, and the currently selected text (if any). Use this when the author refers to "this", "here", or "my selection".',
+    description: 'Returns the file open in the author\'s editor, the cursor line, and the currently selected text (if any), and how many private context items the author keeps for this paper. Use this when the author refers to "this", "here", or "my selection".',
     inputSchema: {},
   }, wrap(async () => {
     const s = ctx.state.editor;
-    if (!s || !s.file) return text('The editor is not open, or no file is selected.');
+    const extra = ctx.context ? contextSummary(ctx.context) : null;
+    if (!s || !s.file) return text(['The editor is not open, or no file is selected.', extra].filter(Boolean).join('\n'));
     const parts = [`Open file: ${s.file}`, `Cursor at line ${s.cursorLine}`];
     if (s.selection && s.selection.text) parts.push(`Selected text (lines ${s.selection.fromLine}-${s.selection.toLine}):\n${s.selection.text}`);
     else parts.push('No text selected.');
+    if (extra) parts.push(extra);
     return text(parts.join('\n'));
   }));
 
@@ -288,6 +292,7 @@ export function buildMcpServer(ctx) {
   }));
 
   registerResponseTools(server, { review, wrap, text });
+  if (ctx.context) registerContextTools(server, { project, context: ctx.context, wrap, text });
 
   return server;
 }

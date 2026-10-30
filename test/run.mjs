@@ -52,8 +52,8 @@ const step = (name) => console.log(`\n── ${name}`);
 step('tools/list');
 const { tools } = await client.listTools();
 console.log(tools.map((t) => t.name).join(', '));
-assert.ok(tools.length >= 19);
-for (const t of ['get_response', 'update_response']) assert.ok(tools.some((x) => x.name === t), `${t} is listed`);
+assert.ok(tools.length >= 22);
+for (const t of ['get_response', 'update_response', 'list_context', 'read_context', 'save_context_note']) assert.ok(tools.some((x) => x.name === t), `${t} is listed`);
 for (const t of ['suggest_edit', 'suggest_edits']) assert.ok(tools.find((x) => x.name === t).inputSchema.properties.responds_to, `${t} takes responds_to`);
 const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 assert.equal(client.getServerVersion()?.version, pkg.version, 'the MCP server reports the package version');
@@ -1253,6 +1253,216 @@ step('response store: versioning, corruption, backups');
   s.responses.addReport({ reviewer: 'Reviewer 2', text: 'Invented too.' });
   assert.equal(JSON.parse(fs.readFileSync(rp(d) + '.bak', 'utf8')).reports.length, 1);
   assert.ok(!fs.existsSync(path.join(d, '.review', 'review.json')));
+}
+
+step('private context: add, refuse, describe, Finder drops, links, MCP, read_file refused, nothing for git');
+{
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'margin-ctx-'));
+  const paper = path.join(dir, 'paper');
+  fs.cpSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'examples', 'sample-paper'), paper, { recursive: true });
+  const git = (...a) => execFileSync('git', ['-c', 'user.name=test', '-c', 'user.email=test@example.org', ...a], { cwd: paper, stdio: 'pipe' }).toString();
+  git('init', '-q'); git('add', '-A'); git('commit', '-qm', 'init');
+  const cport = await freePort();
+  const srv = await startServer({ root: paper, port: cport });
+  const cbase = `http://127.0.0.1:${cport}`;
+  const cc = new Client({ name: 'margin-test-ctx', version: '0' });
+  await cc.connect(new StreamableHTTPClientTransport(new URL(`${cbase}/mcp`)));
+  const ccall = async (name, args = {}) => { const x = await cc.callTool({ name, arguments: args }); return { error: !!x.isError, text: x.content.map((c) => c.text).join('\n') }; };
+  const up = async (name, body) => {
+    const res = await fetch(`${cbase}/api/context/upload?name=${encodeURIComponent(name)}`, { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body });
+    return { status: res.status, body: await res.json() };
+  };
+  const json = async (p, opts = {}) => {
+    const res = await fetch(`${cbase}/api${p}`, { method: opts.method || 'GET', headers: { 'Content-Type': 'application/json' }, body: opts.body ? JSON.stringify(opts.body) : undefined });
+    return { status: res.status, body: await res.json() };
+  };
+  const list = async () => (await json('/context')).body;
+  const ctxDir = path.join(paper, '.review', 'context');
+  const nq = (n) => `?name=${encodeURIComponent(n)}`;
+
+  r = await ccall('get_editor_state');
+  assert.doesNotMatch(r.text, /Context:/, 'no context yet: nothing said');
+  assert.deepEqual((await list()).items, []);
+  assert.match((await ccall('list_context')).text, /no private context/);
+
+  // add: .md, .txt, .pdf
+  const PDF = Buffer.from('%PDF-1.4\n% invented for the Margin test suite\n1 0 obj << >> endobj\ntrailer << >>\n%%EOF\n');
+  const a = await up('Call notes.md', '# Call with a co-author (invented)\n\nKeep the 72 h exposure; the reviewers asked about it last time.\nSecond line.\nThird line.\n');
+  assert.equal(a.status, 200, JSON.stringify(a.body));
+  assert.equal(a.body.name, 'Call notes.md'); assert.equal(a.body.type, 'md'); assert.equal(a.body.source, 'you');
+  assert.equal(a.body.path, '.review/context/Call notes.md');
+  assert.equal((await up('draft.txt', 'An older draft of the abstract.\n')).body.type, 'txt');
+  assert.equal((await up('talk.PDF', PDF)).body.name, 'talk.pdf', 'extension in lower case');
+  assert.deepEqual((await list()).items.map((i) => i.name).sort(), ['Call notes.md', 'draft.txt', 'talk.pdf']);
+  assert.equal(fs.readFileSync(path.join(ctxDir, 'talk.pdf')).toString(), PDF.toString());
+
+  // a name that is taken gets a number, case-insensitively (as on the Mac's disk); nothing is replaced
+  assert.equal((await up('Call notes.md', 'second\n')).body.name, 'Call notes-2.md');
+  assert.equal((await up('call NOTES.md', 'third\n')).body.name, 'call NOTES-3.md');
+  assert.match(fs.readFileSync(path.join(ctxDir, 'Call notes.md'), 'utf8'), /72 h exposure/);
+
+  // refused: other types, oversized, paths, hidden names, the index, fake PDFs, binary text, empty
+  const outsideBefore = fs.readdirSync(dir).sort().join(',');
+  for (const [name, body, re] of [
+    ['report.docx', 'x', /only \.md, \.txt or \.pdf/],
+    ['context.json', '{}', /only \.md, \.txt or \.pdf/],
+    ['../x.md', 'x', /plain file name/],
+    ['..\\x.md', 'x', /plain file name/],
+    ['../context.json', '{}', /plain file name/],
+    ['../../x.md', 'x', /plain file name/],
+    ['/tmp/margin-ctx-pwned.md', 'x', /plain file name/],
+    ['C:\\x.md', 'x', /plain file name/],
+    ['sub/x.md', 'x', /plain file name/],
+    ['.hidden.md', 'x', /Hidden/],
+    ['..', 'x', /Hidden|only/],
+    ['bad\u0001.md', 'x', /control characters/],
+    ['', 'x', /required/],
+    ['fake.pdf', 'not a pdf', /does not look like a PDF/],
+    ['binary.txt', Buffer.from([0x50, 0, 0x51, 0]), /plain text/],
+    ['empty.md', '', /empty/],
+  ]) {
+    const res = await up(name, body);
+    assert.ok(res.status >= 400 && res.status < 500, `${JSON.stringify(name)}: ${res.status}`);
+    assert.match(res.body.error, re, `${JSON.stringify(name)}: ${res.body.error}`);
+  }
+  const big = await up('big.txt', Buffer.alloc(20 * 1024 * 1024 + 10, 0x61));
+  assert.equal(big.status, 413); assert.match(big.body.error, /limit/);
+  assert.equal(fs.readdirSync(dir).sort().join(','), outsideBefore, 'nothing written next to the paper');
+  assert.ok(!fs.existsSync(path.join(paper, 'x.md')) && !fs.existsSync(path.join(paper, '.review', 'x.md')) && !fs.existsSync('/tmp/margin-ctx-pwned.md'));
+  assert.deepEqual(fs.readdirSync(ctxDir).sort(), ['Call notes-2.md', 'Call notes.md', 'call NOTES-3.md', 'draft.txt', 'talk.pdf']);
+
+  // describe (the description is in the index next to the folder, not in it)
+  const d = await json(`/context/item${nq('talk.pdf')}`, { method: 'PUT', body: { description: '  Slides from the lab meeting  ' } });
+  assert.equal(d.status, 200); assert.equal(d.body.description, 'Slides from the lab meeting');
+  assert.equal((await list()).items.find((i) => i.name === 'talk.pdf').description, 'Slides from the lab meeting');
+  const indexFile = path.join(paper, '.review', 'context.json');
+  assert.equal(JSON.parse(fs.readFileSync(indexFile, 'utf8')).items.find((m) => m.name === 'talk.pdf').description, 'Slides from the lab meeting');
+  assert.equal((await json(`/context/item${nq('nope.md')}`, { method: 'PUT', body: { description: 'x' } })).status, 404);
+  assert.equal((await json(`/context/item${nq('../review.json')}`, { method: 'PUT', body: { description: 'x' } })).status, 400);
+
+  // put in the folder directly (Finder): listed without metadata; deleted directly: gone, entry dropped at the next write
+  fs.writeFileSync(path.join(ctxDir, 'Dropped in Finder.txt'), 'Put here by hand.\n');
+  fs.writeFileSync(path.join(ctxDir, 'notes.docx'), 'x');
+  fs.writeFileSync(path.join(ctxDir, '.DS_Store'), 'x');
+  let L = await list();
+  const dropped = L.items.find((i) => i.name === 'Dropped in Finder.txt');
+  assert.ok(dropped); assert.equal(dropped.source, null); assert.equal(dropped.description, '');
+  assert.deepEqual(L.skipped.map((s) => s.name), ['notes.docx'], 'unsupported files are reported, hidden ones ignored');
+  fs.rmSync(path.join(ctxDir, 'Call notes-2.md'));
+  assert.ok(!(await list()).items.some((i) => i.name === 'Call notes-2.md'));
+  await json(`/context/item${nq('Dropped in Finder.txt')}`, { method: 'PUT', body: { description: 'by hand' } });
+  assert.ok(!JSON.parse(fs.readFileSync(indexFile, 'utf8')).items.some((m) => m.name === 'Call notes-2.md'), 'entry for a vanished file dropped');
+
+  // links and folders inside the context folder are skipped, never followed
+  const secret = path.join(dir, 'outside-secret.md');
+  fs.writeFileSync(secret, 'SECRET outside the paper\n');
+  fs.symlinkSync(secret, path.join(ctxDir, 'leak.md'));
+  fs.symlinkSync(path.join(paper, 'main.tex'), path.join(ctxDir, 'inner.txt'));
+  fs.mkdirSync(path.join(ctxDir, 'sub')); fs.writeFileSync(path.join(ctxDir, 'sub', 'a.md'), 'x');
+  L = await list();
+  assert.ok(!L.items.some((i) => ['leak.md', 'inner.txt', 'sub'].includes(i.name)));
+  assert.deepEqual(L.skipped.map((s) => s.name).sort(), ['inner.txt', 'leak.md', 'notes.docx', 'sub']);
+  for (const n of ['leak.md', 'inner.txt']) {
+    const res = await fetch(`${cbase}/context/file${nq(n)}`);
+    assert.equal(res.status, 400); assert.doesNotMatch(await res.text(), /SECRET|documentclass/);
+    r = await ccall('read_context', { name: n }); assert.ok(r.error); assert.doesNotMatch(r.text, /SECRET|documentclass/);
+    assert.equal((await json(`/context/item${nq(n)}`, { method: 'DELETE' })).status, 400);
+    assert.equal((await json(`/context/item${nq(n)}`, { method: 'PUT', body: { description: 'x' } })).status, 400);
+  }
+  assert.equal(fs.readFileSync(secret, 'utf8'), 'SECRET outside the paper\n');
+  // a new file never goes through a link that sits where it would be written
+  assert.equal((await up('leak.md', 'overwrite?')).body.name, 'leak-2.md');
+  assert.equal(fs.readFileSync(secret, 'utf8'), 'SECRET outside the paper\n');
+  for (const n of ['leak.md', 'inner.txt', 'leak-2.md', 'notes.docx']) fs.rmSync(path.join(ctxDir, n));
+  fs.rmSync(path.join(ctxDir, 'sub'), { recursive: true });
+
+  // opening an item: same-origin page, inline, never sniffed as HTML
+  let res = await fetch(`${cbase}/context/file${nq('talk.pdf')}`);
+  assert.equal(res.status, 200); assert.equal(res.headers.get('content-type'), 'application/pdf');
+  assert.match(res.headers.get('content-disposition'), /^inline; filename="talk.pdf"/);
+  assert.equal(Buffer.from(await res.arrayBuffer()).toString(), PDF.toString());
+  res = await fetch(`${cbase}/context/file${nq('Call notes.md')}`);
+  assert.equal(res.headers.get('content-type'), 'text/plain; charset=utf-8');
+  assert.equal(res.headers.get('x-content-type-options'), 'nosniff');
+  assert.match(await res.text(), /72 h exposure/);
+  assert.equal((await fetch(`${cbase}/context/file${nq('Call notes.md')}`, { headers: { 'Sec-Fetch-Site': 'cross-site' } })).status, 403);
+  assert.equal((await fetch(`${cbase}/context/file${nq('../review.json')}`)).status, 400);
+  assert.equal((await fetch(`${cbase}/context/file${nq('missing.md')}`)).status, 404);
+
+  // Claude: list, read (ranges; a PDF gives the path, not bytes), save a note, the count in get_editor_state
+  r = await ccall('list_context');
+  assert.ok(!r.error);
+  assert.match(r.text, /path: \.review\/context\/talk\.pdf/);
+  assert.match(r.text, /Slides from the lab meeting/);
+  assert.match(r.text, /Read tool/);
+  assert.match(r.text, /never cite it/);
+  r = await ccall('read_context', { name: 'Call notes.md' });
+  assert.ok(!r.error); assert.match(r.text, /^\s+3 {2}Keep the 72 h exposure/m); assert.match(r.text, /lines 1–5 of 5/);
+  r = await ccall('read_context', { name: 'Call notes.md', start_line: 4, max_lines: 1 });
+  assert.match(r.text, /lines 4–4 of 5; continue with start_line 5/); assert.match(r.text, /4 {2}Second line\./); assert.doesNotMatch(r.text, /Third line/);
+  assert.ok((await ccall('read_context', { name: 'Call notes.md', start_line: 99 })).error);
+  r = await ccall('read_context', { name: 'talk.pdf' });
+  assert.ok(!r.error); assert.match(r.text, /Read tool/); assert.ok(r.text.includes(path.join(paper, '.review', 'context', 'talk.pdf'))); assert.doesNotMatch(r.text, /%PDF|endobj/);
+  assert.ok((await ccall('read_context', { name: '../review.json' })).error);
+  r = await ccall('save_context_note', { title: 'Discussion: units / figures?', body: 'The author pasted this (invented).\n\nUse SI units throughout.', description: 'Pasted in the terminal' });
+  assert.ok(!r.error, r.text); assert.match(r.text, /Saved Discussion- units - figures-\.md/);
+  const note = (await list()).items.find((i) => i.source === 'claude');
+  assert.equal(note.name, 'Discussion- units - figures-.md'); assert.equal(note.description, 'Pasted in the terminal');
+  assert.equal(fs.readFileSync(path.join(ctxDir, note.name), 'utf8'), '# Discussion: units / figures?\n\nThe author pasted this (invented).\n\nUse SI units throughout.\n');
+  assert.ok((await ccall('save_context_note', { title: 'x', body: '  ' })).error);
+  // the author's quick note from the UI: the title is optional (the first line then)
+  const qn = await json('/context/note', { method: 'POST', body: { title: '', body: 'Remember: the editor wants 250 words max.\nMore.' } });
+  assert.equal(qn.status, 200); assert.equal(qn.body.name, 'Remember- the editor wants 250 words max.md'); assert.equal(qn.body.source, 'you');
+  r = await ccall('get_editor_state');
+  assert.match(r.text, /Context: 7 items .* list_context/);
+
+  // the private folders stay unreachable through the normal file paths, context included
+  for (const bad of ['.review/context/Call notes.md', '.review/context.json', 'sections/../.review/context/talk.pdf']) {
+    r = await ccall('read_file', { path: bad });
+    assert.ok(r.error && /ignored folder/.test(r.text), `read_file ${bad}`);
+    for (const route of ['file', 'raw']) assert.equal((await fetch(`${cbase}/api/${route}?path=${encodeURIComponent(bad)}`)).status, 400, `${route} ${bad}`);
+  }
+  assert.ok(!(await json('/tree')).body.some((f) => f.path.startsWith('.review')));
+
+  // delete: the file goes (no trash), and its entry
+  assert.equal((await json(`/context/item${nq('draft.txt')}`, { method: 'DELETE' })).status, 200);
+  assert.ok(!fs.existsSync(path.join(ctxDir, 'draft.txt')));
+  assert.equal((await json(`/context/item${nq('draft.txt')}`, { method: 'DELETE' })).status, 404);
+
+  // none of it is visible to git (so Sync can never push it to Overleaf)
+  assert.equal(git('status', '--porcelain', '--untracked-files=all'), '', 'git status stays empty');
+  assert.match(fs.readFileSync(path.join(paper, '.git', 'info', 'exclude'), 'utf8'), /^\.review\/$/m);
+
+  await cc.close();
+  await srv.close();
+
+  // the index: corrupt -> moved aside (never overwritten), files still listed; newer -> refused, untouched
+  const { ContextStore } = await import('../server/context.js');
+  const proj = new Project(paper);
+  fs.writeFileSync(indexFile, '{"version":1,"items":[');
+  const warn = console.warn; console.warn = () => {};
+  let cs; try { cs = new ContextStore(proj); } finally { console.warn = warn; }
+  assert.ok(!fs.existsSync(indexFile));
+  const aside = fs.readdirSync(path.join(paper, '.review')).filter((f) => f.startsWith('context.json.corrupt-'));
+  assert.equal(aside.length, 1); assert.equal(fs.readFileSync(path.join(paper, '.review', aside[0]), 'utf8'), '{"version":1,"items":[');
+  assert.ok(cs.list().items.some((i) => i.name === 'talk.pdf' && i.description === ''), 'files survive a lost index');
+  cs.setDescription('talk.pdf', 'again');
+  cs.setDescription('talk.pdf', 'and again');
+  assert.equal(JSON.parse(fs.readFileSync(indexFile + '.bak', 'utf8')).items.find((m) => m.name === 'talk.pdf').description, 'again', 'saves keep backups');
+  const future = JSON.stringify({ version: 99, items: [] });
+  fs.writeFileSync(indexFile, future);
+  assert.throws(() => new ContextStore(proj), /newer version of Margin/);
+  assert.equal(fs.readFileSync(indexFile, 'utf8'), future);
+  // a context folder that is a link to somewhere else is refused, not used
+  fs.rmSync(indexFile);
+  fs.renameSync(ctxDir, path.join(dir, 'elsewhere'));
+  fs.symlinkSync(path.join(dir, 'elsewhere'), ctxDir);
+  cs = new ContextStore(proj);
+  assert.throws(() => cs.list(), /not a plain folder/);
+  assert.throws(() => cs.addNote({ title: 't', body: 'b' }), /not a plain folder/);
+  assert.equal(git('status', '--porcelain', '--untracked-files=all'), '');
+  fs.rmSync(dir, { recursive: true, force: true });
+  console.log('md/txt/pdf added; types, sizes, paths, hidden names, links refused; Finder drops listed; MCP list/read/save; index corruption quarantined; git status clean');
 }
 
 step('git: fetch makes status().behind real; timer only with a remote, cleared by close()');
