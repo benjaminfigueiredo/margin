@@ -64,9 +64,11 @@ The test needs latexmk, bibtex and synctex on PATH.
   refuses requests a browser marks as cross-site (Origin / Sec-Fetch-Site), on
   HTTP and the WebSocket alike. The hub does the same, with the same code
   (`server/localhost.js`), and is stricter on GET. Don't loosen any of this.
-- **The hub's CLI and readiness line are an interface** (a native shell starts
-  `margin hub` and waits for `MARGIN_HUB_READY <url>` on stdout). Keep them as
-  documented in README.md ("For programs that start the hub").
+- **The hub's CLI and readiness line are an interface** (the Mac app in `mac/`
+  starts `margin hub --no-open --port 4242 --exit-with-stdin`, waits for
+  `MARGIN_HUB_READY <url>` on stdout, and relies on the hub stopping when its
+  stdin pipe closes). Keep them as documented in README.md ("For programs that
+  start the hub").
 - **The review store has one writer**: the server process. MCP tools and the UI
   both go through `ReviewStore`; don't write `.review/review.json` directly.
 - **MCP tool changes are user-facing.** Tool names and descriptions are what

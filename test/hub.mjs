@@ -402,6 +402,37 @@ step('SIGTERM to margin hub stops its papers; bare `margin` picks paper or hub b
   await new Promise((ok) => ed.on('exit', ok));
 }
 
+step('margin hub --exit-with-stdin: the hub and its papers stop when the starting program goes away');
+{
+  const cfg5 = path.join(tmp, 'config-stdin');
+  const port5 = rand() + 1;
+  const paperPort = port5 + 1;
+  fs.mkdirSync(cfg5, { recursive: true });
+  fs.writeFileSync(path.join(cfg5, 'projects.json'), JSON.stringify({ version: 1, projects: [{ id: a.id, path: paperA, name: 'paper-a', port: paperPort, addedAt: new Date().toISOString(), lastOpened: null }] }));
+  // Only the hub takes it: a paper server refuses it rather than ignoring it.
+  const bad = spawn(process.execPath, [BIN, paperB, '--no-open', '--exit-with-stdin', '--port', String(rand() + 1)], { env: { ...process.env, MARGIN_CONFIG_DIR: cfg5 }, stdio: ['ignore', 'pipe', 'pipe'] });
+  let badErr = ''; bad.stderr.on('data', (d) => { badErr += d; });
+  assert.equal(await new Promise((ok) => bad.on('exit', ok)), 1);
+  assert.match(badErr, /--exit-with-stdin is an option of margin hub only/);
+
+  // What the Mac app does: stdin is a pipe it holds open and never writes to.
+  const proc = spawn(process.execPath, [BIN, 'hub', '--no-open', '--exit-with-stdin', '--port', String(port5)], { env: { ...process.env, MARGIN_CONFIG_DIR: cfg5 }, stdio: ['pipe', 'pipe', 'pipe'] });
+  let out = ''; proc.stdout.on('data', (d) => { out += d; }); proc.stderr.on('data', (d) => { out += d; });
+  const exited = new Promise((ok) => proc.on('exit', (code, signal) => ok({ code, signal })));
+  for (let i = 0; i < 100 && !out.includes(READY_PREFIX); i++) await sleep(100);
+  assert.match(out, new RegExp(`^MARGIN_HUB_READY http://127\\.0\\.0\\.1:${port5}/$`, 'm'), `ready line printed:\n${out}`);
+  proc.stdin.write('anything written to stdin is ignored\n');
+  const r = await hubApi(port5)(`/papers/${a.id}/start`, { method: 'POST' });
+  assert.equal(r.body.state, 'running', r.body.error);
+  assert.ok(alive(proc.pid), 'the hub keeps running while stdin stays open');
+  proc.stdin.end(); // the starting program quit, crashed or was force-quit
+  const { code, signal } = await Promise.race([exited, sleep(15000).then(() => ({ code: 'timeout' }))]);
+  assert.equal(code, 0, `the hub exits cleanly when stdin closes (signal ${signal})\n${out}`);
+  assert.ok(await waitGone(r.body.pid), 'and stops its paper first');
+  assert.ok(await isPortFree(paperPort)); assert.ok(await isPortFree(port5));
+  console.log(`stdin closed: hub pid ${proc.pid} exited 0, paper pid ${r.body.pid} stopped`);
+}
+
 fs.rmSync(tmp, { recursive: true, force: true });
 console.log('\nAll hub checks passed.');
 process.exit(0);

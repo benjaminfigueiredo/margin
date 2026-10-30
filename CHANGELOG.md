@@ -20,6 +20,9 @@
   Margin's settings folder (`~/Library/Application Support/margin` on macOS, `~/.config/margin`
   elsewhere, or `MARGIN_CONFIG_DIR`), never in a paper. Programs that start the hub can wait for
   the line `MARGIN_HUB_READY <url>` on stdout. `margin <folder>` and `margin init` are unchanged.
+- `margin hub --exit-with-stdin`: the hub (and its papers) also stop when stdin closes, so a
+  program that starts the hub with a pipe on its stdin never leaves it running behind, even if
+  that program crashes or is force-quit.
 - Theme, font size and layout (**Aa**) are now shared by all your papers on this computer, in
   Margin's settings folder, instead of being remembered separately for each port.
 - `margin <folder>` warns when the folder's `.mcp.json` points Claude Code at a different port.

@@ -7,6 +7,7 @@
 //   margin                       the editor if the current folder has a .tex file, else the hub
 //
 // Options: --port 4242  --main main.tex  --engine pdflatex|xelatex|lualatex  --no-open
+//          --exit-with-stdin (hub only: stop when stdin closes, for programs that start the hub)
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
@@ -31,6 +32,7 @@ for (let i = 0; i < argv.length; i++) {
   else if (a === '--main') opts.main = argv[++i];
   else if (a === '--engine') opts.engine = argv[++i];
   else if (a === '--no-open') opts.open = false;
+  else if (a === '--exit-with-stdin') opts.exitWithStdin = true;
   else if (a === '-h' || a === '--help') { usage(); process.exit(0); }
   else positional.push(a);
 }
@@ -49,6 +51,8 @@ Options:
   --main <file>     Main .tex file (default: main.tex or the file with \\documentclass)
   --engine <name>   pdflatex | xelatex | lualatex (default pdflatex)
   --no-open         Don't open the browser
+  --exit-with-stdin (margin hub) Stop the hub, and its papers, when stdin closes:
+                    for a program that starts the hub and keeps a pipe open on its stdin
 
 When the hub is listening it prints one line for programs that start it:
   MARGIN_HUB_READY http://127.0.0.1:<port>/`);
@@ -62,7 +66,10 @@ if (positional[0] === 'init') {
 
 const hasTex = (dir) => { try { return fs.readdirSync(dir).some((n) => n.toLowerCase().endsWith('.tex')); } catch { return false; } };
 
-if (positional[0] === 'hub' || (positional.length === 0 && !hubUrl && !hasTex(process.cwd()))) {
+const startsHub = positional[0] === 'hub' || (positional.length === 0 && !hubUrl && !hasTex(process.cwd()));
+if (opts.exitWithStdin && !startsHub) { console.error('--exit-with-stdin is an option of margin hub only.'); process.exit(1); }
+
+if (startsHub) {
   if (positional[0] === 'hub' && positional.length > 1) { console.error('margin hub takes no folder. Add papers from the hub page.'); process.exit(1); }
   if (positional[0] !== 'hub') console.log(`No .tex file in ${process.cwd()}, so starting the hub (margin <folder> opens one paper).`);
   await runHub();
@@ -113,13 +120,23 @@ async function runHub() {
   console.log(`${READY_PREFIX} ${hub.url}`);
   console.log(`\n  Margin hub: ${hub.url}\n  Papers and settings: ${hub.configDir}\n  Ctrl+C stops the hub and every paper it started.\n`);
   let stopping = false;
-  const stop = async () => {
-    if (stopping) process.exit(1); // a second Ctrl+C: don't wait
+  const stop = (why) => {
+    if (stopping) {
+      if (why !== 'stdin') process.exit(1); // a second Ctrl+C: don't wait
+      return; // stdin closing during a shutdown (the app quitting after its SIGTERM): let it finish
+    }
     stopping = true;
-    await hub.close();
-    process.exit(0);
+    hub.close().then(() => process.exit(0), () => process.exit(1));
   };
-  for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, stop);
+  for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => stop(sig));
+  // The program that started the hub (the Mac app) keeps a pipe open on our stdin. When that
+  // program goes away, however it goes (quit, crash, force quit), the pipe closes: stop as on
+  // SIGTERM, so neither the hub nor its papers outlive it. Anything written to stdin is ignored.
+  if (opts.exitWithStdin) {
+    process.stdin.on('end', () => stop('stdin'));
+    process.stdin.on('error', () => stop('stdin'));
+    process.stdin.resume();
+  }
   if (opts.open) openBrowser(hub.url);
 }
 

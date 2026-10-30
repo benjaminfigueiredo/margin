@@ -182,9 +182,15 @@ and the hub on the same paper at once; if `.mcp.json` names another port,
 
 #### For programs that start the hub (a native app, scripts)
 
-- Start: `margin hub [--port N] [--no-open]` (default port 4242). The process is
-  the hub; stop it with SIGTERM (or SIGINT), which stops every paper it started
-  and then exits with status 0.
+- Start: `margin hub [--port N] [--no-open] [--exit-with-stdin]` (default port
+  4242). The process is the hub; stop it with SIGTERM (or SIGINT), which stops
+  every paper it started and then exits with status 0.
+- `--exit-with-stdin`: the hub also stops that way when its stdin reaches end of
+  file. Give it a pipe and keep the write end open for as long as you want the
+  hub; when your program exits, however it exits (a crash, a force quit), the
+  pipe closes and the hub and its papers stop. Anything written to the pipe is
+  ignored. Don't use it with stdin on `/dev/null`: the hub would stop at once.
+  (`margin <folder>` refuses this option.)
 - Ready: once it is listening, the hub prints one line to stdout,
   `MARGIN_HUB_READY http://127.0.0.1:<port>/`. Other output is for people. If the
   port is taken it prints a message to stderr and exits with status 1 (the message
