@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+- **Notifications.** Margin tells you when Claude is done ("Claude is done — sections/intro.tex:
+  4 suggestions, 1 comment"), when Claude needs you (a permission prompt, or waiting for your
+  input), when Claude answered a question you asked with Ask Claude, and when Overleaf has new
+  commits, while you look elsewhere. The Mac app shows them as macOS notifications when the
+  paper's window is not in front (macOS asks the first time; clicking one brings the paper
+  forward); in a browser, turn them on under **Aa → Notifications** (they only appear while the
+  tab is in the background). Claude's come from two new Claude Code hooks (`Stop` and
+  `Notification`, `.claude/hooks/margin-events.mjs`) that `margin init` installs next to your own
+  hooks. **Papers set up before this need `margin init` run again** in their folder (or **Update
+  for Claude** in the Papers window), then a restart of `claude` there.
+- **Mac app: split screen with Claude in one click.** **Claude terminal** (a paper's status bar,
+  or the Papers window) puts the paper's window on the top of its screen and Terminal, running
+  `claude` in the paper folder, in a strip below it. Pressing it again re-arranges the same
+  Terminal window. If macOS's Automation permission for Terminal was refused, the app says where
+  to allow it.
+- **Mac app: notes dropped on Margin.** `.md`, `.txt` and `.pdf` files dropped on the Dock icon or
+  the Papers window, or opened with Finder's Open With → Margin, are added to the private context
+  of the paper you choose (it is started if need be), with a report of what happened to each
+  file. Margin is never made the default app for these files; folders still open as papers.
+
 - Fix (privacy): when the paper folder was a subfolder of its git repository, a linked worktree or
   a submodule, Margin did not keep its own folders out of git, so Sync could commit `.review/`
   (review history, referee reports, private context notes) and push it to Overleaf. The

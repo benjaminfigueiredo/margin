@@ -23,6 +23,8 @@ server/context.js   Private context (.review/context/ files, .review/context.jso
                     (plain names, regular files, no links, O_EXCL creates), its REST routes and the /context/file page
 server/context-mcp.js  MCP tools for the context (list_context, read_context, save_context_note)
 server/asks.js      "Ask Claude" requests: state, delivery to the prompt hook, Claude activity
+server/claude-events.js  Notifications: POST /api/claude/event from the Stop/Notification hooks, asks answered,
+                    coalescing; broadcasts `claude-event` (web/src/notify.js shows it)
 server/search.js    Project-wide find and replace
 server/wordcount.js LaTeX word counter (also bundled into the browser)
 server/compile.js   latexmk invocation, TeX log parser, SyncTeX forward/inverse
@@ -33,7 +35,8 @@ server/changes.js   Changes view: read-only `git diff` parsed into per-file hunk
 server/latexdiff.js latexdiff --flatten between a git ref and the paper, compiled into .margin-build/diff/ (never over the real PDF)
 server/project.js   Path safety (all client paths go through Project.abs), file tree, create/rename/delete/upload
 server/init.js      `margin init`: .mcp.json, .claude/ files, .git/info/exclude
-templates/          CLAUDE.md, slash commands and the prompt hook that `margin init` copies into a paper
+templates/          CLAUDE.md, slash commands and the hooks (hooks/margin-asks.mjs: UserPromptSubmit;
+                    hooks/margin-events.mjs: Stop, Notification) that `margin init` copies into a paper
 web/                UI source: CodeMirror 6 editor, pdf.js viewer, review panel (Review | Response | Context views:
                     web/src/review.js, response.js, context.js); hub.html/hub.css/src/hub.js for the hub page
 public/             Built UI (committed so users can run without dev dependencies)
@@ -43,7 +46,10 @@ test/hub.mjs        End-to-end hub test (child processes, ports, .mcp.json, guar
 test/ui/            Playwright browser tests (npm test runs both)
 mac/                Mac app: Swift package (AppKit + WKWebView shell that starts `margin hub`), Info.plist,
                     build-app.sh (→ mac/dist/Margin.app, .zip), check-app.sh, tools/make-icon.swift.
-                    Built and smoke-tested only on macOS CI (.github/workflows/macos-app.yml)
+                    PageMessages.swift (the `margin` message handler), Notifier.swift (UNUserNotification),
+                    SplitScreen.swift (window rects, Terminal via osascript argv), NoteDrop.swift (notes
+                    dropped on the app → a paper's context). Built and smoke-tested only on macOS CI
+                    (.github/workflows/macos-app.yml)
 ```
 
 ## Commands
@@ -101,6 +107,20 @@ The test needs latexmk, bibtex and synctex on PATH.
   (a file `<input>`, `window.open`, a `download` link, a new ⌘ shortcut) must be checked there.
 - The Mac app calls `window.marginBeforeClose()` (web/src/main.js) before closing a paper window or
   quitting, and asks the author when it reports unsaved edits. Keep that function and its contract.
+- The pages talk to the Mac app through `window.webkit.messageHandlers.margin.postMessage(m)`
+  (web/src/notify.js; the app side is mac/Sources/Margin/PageMessages.swift). It is a contract:
+  `{ type: 'notify', title, body, tag }` (a paper page; the app shows it only when that window is
+  not in front, same tag replaces) and `{ type: 'splitWithClaude', paper? }` (a paper page, or the
+  Papers page with a hub paper id). The app accepts them only from its own windows' main frames on
+  the expected origin and ignores unknown types; the page posts only when the handler exists, so
+  browsers keep their own behaviour. Changing a message means changing both sides in one commit.
+- In the Mac app, never call `alert.runModal()` (or anything else that spins a nested run loop)
+  from a Task when a sheet will do: use `await Alerts.sheet(…, on: window)` (Support.swift).
+- Claude Code hooks (`templates/hooks/`) must always exit 0, print nothing unless Claude Code
+  should read it (only UserPromptSubmit's stdout reaches Claude), and give up within ~2 s when
+  Margin is not running. `margin init` merges them by script name and keeps the author's hooks;
+  papers set up before a new hook need `margin init` again (the hub shows "Update for Claude"
+  when `hooksInstalled()` in server/init.js is false).
 - `res.sendFile` with an absolute path refuses any dot-folder in it (Margin itself may live in
   one, e.g. a `.claude/worktrees/` checkout): pass `{ root }` and a relative name.
 - Node's global HTTP agent keeps connections alive: a test that restarts a server on the same

@@ -159,9 +159,12 @@ Running `margin` with no folder does the same when the current folder has no
   which is now the hub), it says so, and a Claude session already open in that
   folder must be restarted (`/exit`, then `claude`). Nothing else in `.mcp.json`
   is changed. A paper never set up for Claude gets a **Set up for Claude** button,
-  which runs `margin init` with the right port. On macOS, **Claude terminal**
+  which runs `margin init` with the right port; one set up by an older Margin
+  (without the notification hooks) gets **Update for Claude**, which runs it again
+  and keeps your own settings and hooks. On macOS, **Claude terminal**
   opens Terminal in the paper folder and runs `claude` (the first time, macOS
-  asks whether Margin may control Terminal).
+  asks whether Margin may control Terminal; in the Mac app it also arranges the
+  two windows, see below).
 - If a paper's port is taken (for example by `margin my-paper` still running in a
   terminal), the hub says so instead of starting a second copy.
 - A paper opened from the hub has a **‹ Papers** link in its top bar.
@@ -237,9 +240,33 @@ so everything in [the hub](#several-papers-the-hub) applies.
   terminal), the app uses it and leaves it running when it quits.
 - If the hub cannot start (port 4242 taken by `margin <folder>`, for example) the
   app says why. The hub's output is in `~/Library/Logs/Margin/hub.log`.
-- The first time you press **Claude terminal**, macOS asks whether Margin may
-  control Terminal. If you said no, allow it in System Settings → Privacy &
-  Security → Automation → Margin.
+- **Split screen with Claude in one click.** **Claude terminal** (in a paper's
+  status bar, or next to the paper in the Papers window) puts the paper's window
+  on the top of its screen and Terminal, running `claude` in the paper folder, in
+  a strip along the bottom (about a fifth of the screen, at least eight rows).
+  Pressing it again puts the same Terminal window back in place instead of
+  opening another (if you closed it, a new one opens). The first time, macOS asks
+  whether Margin may control Terminal. If you said no, allow it in System
+  Settings → Privacy & Security → Automation → Margin, then press it again.
+- **Notifications.** While you look at another window or app, Margin tells you
+  when Claude is done ("Claude is done — sections/intro.tex: 4 suggestions, 1
+  comment"), when Claude needs you (a permission prompt, or waiting for your
+  input), when Claude answered a question you asked with Ask Claude, and when
+  Overleaf has new commits. Click one to bring that paper's window forward.
+  macOS asks whether Margin may send notifications the first time there is one;
+  change it any time in System Settings → Notifications → Margin. Claude's
+  notifications come from Claude Code hooks that `margin init` installs: **for a
+  paper set up before this version, run `margin init` in its folder again** (or
+  press **Update for Claude** next to it in the Papers window), then restart
+  `claude` there. In a browser, the same notifications are available under
+  **Aa → Notifications** (off until you turn them on).
+- **Notes for Claude, dropped on Margin.** Drop `.md`, `.txt` or `.pdf` files on
+  Margin's Dock icon or on the Papers window (or use Finder's **Open With →
+  Margin**): Margin asks which paper they are for (the one in front is
+  preselected), starts it if needed and adds them to its
+  [private context](#private-context-notes-and-discussions), then says what
+  happened to each file. Margin never becomes the default app for those files.
+  Folders dropped the same way still open as papers.
 
 The command line keeps working exactly as before, with or without the app.
 
@@ -324,9 +351,10 @@ coloured-font style otherwise, so a minimal TeX install still works.
 ### Split screen with your Claude terminal
 
 Put the browser in the top half of the screen and your `claude` terminal (in the
-paper folder) in the bottom half. Margin switches to its compact **Split screen**
-layout by itself when the window is 660 px tall or less; choose it, or
-**Standard**, under **Aa → Layout**.
+paper folder) in the bottom half. In the [Mac app](#the-mac-app), **Claude
+terminal** in the status bar does this in one click. Margin switches to its
+compact **Split screen** layout by itself when the window is 660 px tall or less;
+choose it, or **Standard**, under **Aa → Layout**.
 
 1. Select a passage and press **Ask Claude** (⌘/Ctrl + Alt + A). Type what you
    want, or pick a starter (Concise, Check claim, …), and send with ⌘/Ctrl + Enter.
@@ -343,6 +371,13 @@ The status bar shows when Claude last used Margin and how many asks are waiting
 (click it to copy `/margin`). Margin never types into or controls your terminal:
 the hand-over happens when you send a message, through a Claude Code hook that
 `margin init` installs. If Margin isn't running, the hook does nothing.
+
+Two more hooks (`Stop` and `Notification`) tell Margin when Claude has finished
+its turn or needs you, so Margin can notify you while you read the paper: in the
+Mac app always, in a browser once you turn on **Aa → Notifications** (only while
+the tab is in the background). A paper set up with an older `margin init` needs
+it run again for these, then a restart of `claude`. They never block Claude, print
+nothing, and do nothing when Margin isn't running.
 
 ## What Claude can do (MCP tools)
 
@@ -499,8 +534,8 @@ If you had your own `.claude/` folder before running `margin init`, don't delete
 it. Instead remove only what Margin added:
 - `.claude/CLAUDE.md`
 - `.claude/commands/review.md`, `address-comments.md`, `check-citations.md`, `fix-compile.md`, `margin.md`
-- `.claude/hooks/margin-asks.mjs`
-- in `.claude/settings.local.json`: `"margin"` from `enabledMcpjsonServers`, `"mcp__margin__*"` from `permissions.allow`, and the `UserPromptSubmit` hook that runs `margin-asks.mjs`
+- `.claude/hooks/margin-asks.mjs` and `.claude/hooks/margin-events.mjs`
+- in `.claude/settings.local.json`: `"margin"` from `enabledMcpjsonServers`, `"mcp__margin__*"` from `permissions.allow`, the `UserPromptSubmit` hook that runs `margin-asks.mjs`, and the `Stop` and `Notification` hooks that run `margin-events.mjs`
 
 `.review/review.json` holds your review threads. Copy it somewhere first if you
 want to keep that history.
@@ -530,6 +565,7 @@ server/mcp.js       Claude's tools (MCP over HTTP at /mcp)
 server/review.js    suggestion/comment store and text anchoring
 server/context.js   private context: the author's notes in .review/context/, their descriptions
 server/asks.js      "Ask Claude": hand-over to the Claude terminal, Claude activity
+server/claude-events.js  notifications: Claude is done / needs you (Claude Code hooks), asks answered
 server/compile.js   latexmk, log parsing, SyncTeX
 server/bib.js       BibTeX parsing, citation checks, DOI/Crossref
 server/zotero.js    Zotero library search and export (Better BibTeX / local API)
@@ -537,7 +573,7 @@ server/git.js       commit / pull --rebase / push
 server/changes.js   Changes view: per-file hunks since the last sync / last commit, accepted-since list
 server/latexdiff.js latexdiff PDF of the changes, built under .margin-build/diff/
 server/init.js      margin init
-templates/          CLAUDE.md, slash commands and the prompt hook installed by init
+templates/          CLAUDE.md, slash commands and the hooks installed by init
 web/                UI source (CodeMirror 6, pdf.js) and the hub page → built into public/
 test/run.mjs        end-to-end test (npm test)
 test/hub.mjs        end-to-end test of the hub (npm test)
