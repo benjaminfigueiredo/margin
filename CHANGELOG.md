@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Security: Claude's `read_file` and the editor's file and raw routes could read inside the private
+  folders (`.review/` with the review history and referee reports, `.git/`, `.claude/`), even
+  through a symlink inside the paper. They now refuse, as writes already did.
 - Fix: a review item id typed as a short prefix that fits several items (accept, reject, resolve,
   reply) used to act on the first one. It is now refused with the candidates listed, and prefixes
   under 4 characters are refused.

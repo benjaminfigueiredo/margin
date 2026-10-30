@@ -309,6 +309,32 @@ for (const bad of ['.review/x', '.git/config', '.claude/settings.local.json']) {
 assert.equal(fs.existsSync(path.join(safeDir, '.review')), false);
 assert.equal(fs.existsSync(path.join(safeDir, '.git')), false);
 
+step('reads of private folders are refused too (HTTP, MCP, Project.read)');
+{
+  const reviewJson = path.join(paperRoot, '.review', 'review.json');
+  assert.ok(fs.existsSync(reviewJson), 'the paper has review history by now');
+  const link = path.join(paperRoot, 'sneaky-link.txt');
+  fs.symlinkSync(reviewJson, link); // inside the paper, but leads into .review
+  try {
+    for (const bad of ['.review/review.json', '.REVIEW/review.json', 'sections/../.review/review.json', '.git/HEAD', '.claude/settings.json', 'sneaky-link.txt']) {
+      for (const route of ['file', 'raw']) {
+        res = await fetch(`${base}/api/${route}${q(bad)}`);
+        assert.equal(res.status, 400, `${route} ${bad}`);
+        assert.doesNotMatch(await res.text(), /"items"/);
+      }
+      r = await call('read_file', { path: bad });
+      assert.ok(r.error && /ignored folder/.test(r.text), `read_file ${bad}: ${r.text}`);
+    }
+  } finally { fs.rmSync(link); }
+  assert.throws(() => new Project(paperRoot).read('.review/review.json'), /ignored folder/);
+  // ordinary files, and the build output's dedicated routes, still work
+  assert.match((await rest(`/file${q('sections/intro.tex')}`)).content, /\\section/);
+  assert.equal((await fetch(`${base}/api/raw${q('main.tex')}`)).status, 200);
+  assert.equal((await fetch(`${base}/pdf`)).status, 200);
+  r = await call('read_file', { path: 'sections/intro.tex', end_line: 2 });
+  assert.ok(!r.error);
+}
+
 // Escaping symlinks have their own step ("path safety: symlinks") further up.
 fs.rmSync(safeDir, { recursive: true, force: true });
 

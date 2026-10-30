@@ -131,8 +131,22 @@ export class Project {
     return this.tree().filter((f) => f.type === 'file' && f.text && (!ext || f.path.endsWith(ext))).map((f) => f.path);
   }
 
+  // abs() for reading on behalf of a client: refuses the folders Margin keeps private (.review has
+  // the review history and referee reports, .git, .claude, ...), by the normalised path and by
+  // where a symlink inside the paper really leads. Writes were already refused there (#target).
+  // The compile log, the PDF and build output are served by their own routes, not through this.
+  readPath(rel) {
+    const abs = this.abs(rel);
+    const refuse = () => { throw new Error(`Refusing to read an ignored folder (.git, .review, .claude, .margin-build, node_modules): ${rel}`); };
+    if (this.isIgnored(this.rel(abs))) refuse();
+    let real = null;
+    try { real = fs.realpathSync(abs); } catch { /* missing: the read reports it */ }
+    if (real && this.isIgnored(path.relative(this.realRoot, real))) refuse();
+    return abs;
+  }
+
   read(rel) {
-    return fs.readFileSync(this.abs(rel), 'utf8');
+    return fs.readFileSync(this.readPath(rel), 'utf8');
   }
 
   // Creates the file (and any missing folders) or replaces it. `exclusive` makes it create-only:

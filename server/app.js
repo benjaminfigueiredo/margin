@@ -123,7 +123,7 @@ export async function startServer({ root, port = 4242, main, engine, configDir, 
   api.get('/tree', handle(async () => project.tree()));
   api.get('/file', handle(async (req) => {
     const p = String(req.query.path || '');
-    const stat = fs.statSync(project.abs(p));
+    const stat = fs.statSync(project.readPath(p));
     return { path: p, content: project.read(p), mtime: stat.mtimeMs };
   }));
   api.put('/file', handle(async (req) => {
@@ -175,7 +175,7 @@ export async function startServer({ root, port = 4242, main, engine, configDir, 
     return { ok: true };
   }));
   api.get('/raw', (req, res) => {
-    try { res.sendFile(project.abs(String(req.query.path || '')), { dotfiles: 'allow' }); } catch (e) { res.status(400).send(e.message); }
+    try { res.sendFile(project.readPath(String(req.query.path || '')), { dotfiles: 'allow' }); } catch (e) { res.status(400).send(e.message); }
   });
 
   api.post('/compile', handle(async () => summarize(await runCompile('you'))));
