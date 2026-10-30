@@ -127,7 +127,7 @@ final class SmokeTest {
     private func quit() {
         step("quitting")
         say("quitting through the normal quit path (⌘Q)")
-        NSApp.terminate(nil)
+        AppDelegate.requestQuit()
     }
 
     /// From applicationWillTerminate, after the normal quit path ran.

@@ -61,7 +61,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 smoke.abortLaunch("the hub did not start: \(e?.title ?? "error"): \(error.localizedDescription)")
             }
             Alerts.show(e?.title ?? "Margin could not start", error.localizedDescription, style: .critical, buttons: ["Quit"])
-            NSApp.terminate(nil)
+            AppDelegate.requestQuit()
             return
         }
         hubReady = true
@@ -84,7 +84,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if answer == .alertFirstButtonReturn {
             Task { await self.startHub() }
         } else {
-            NSApp.terminate(nil)
+            AppDelegate.requestQuit()
         }
     }
 
@@ -195,12 +195,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             await self.hub.stop()
             self.replyTerminate()
         }
-        // Never hang on the way out, whatever happens above.
-        Task {
-            try? await Task.sleep(nanoseconds: 15_000_000_000)
-            self.replyTerminate()
-        }
+        // Never hang on the way out, whatever happens above. A run-loop timer in the common modes,
+        // not a Task: while AppKit waits for our reply it spins the run loop in the modal-panel mode,
+        // and this must fire even if the tasks above cannot run.
+        let watchdog = Timer(timeInterval: 15, target: self, selector: #selector(quitWatchdogFired), userInfo: nil, repeats: false)
+        RunLoop.main.add(watchdog, forMode: .common)
         return .terminateLater
+    }
+
+    @objc private func quitWatchdogFired() { replyTerminate() }
+
+    /// Quit through the normal path (applicationShouldTerminate), started from the run loop the way
+    /// ⌘Q is. Calling NSApp.terminate directly from a Task would run AppKit's wait for our reply
+    /// inside a main-queue block, and GCD does not run other main-queue blocks re-entrantly, so the
+    /// shutdown tasks above (and their reply) would never run: the app hung on quit.
+    static func requestQuit() {
+        NSApp.perform(#selector(NSApplication.terminate(_:)), with: nil, afterDelay: 0)
     }
 
     private func replyTerminate() {
