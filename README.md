@@ -209,6 +209,79 @@ and the hub on the same paper at once; if `.mcp.json` names another port,
   with their `state` (`stopped`, `starting`, `running`, `error`), `port`, `url`
   and `pid`.
 
+### The Mac app
+
+`Margin.app` is the hub in its own windows instead of a browser tab and a
+terminal: double-click it, and the **Papers** window lists your papers; each paper
+opens in a window of its own (one per paper; opening it again brings that window
+forward), with its size and place remembered. It is a small native shell (Swift,
+AppKit and WebKit, no third-party code) around exactly what `margin hub` serves,
+so everything in [the hub](#several-papers-the-hub) applies.
+
+- **It needs Node.js 20 or later and TeX installed on the Mac** (see
+  [Install](#1-install-once)); the app contains Margin itself but no Node, so
+  Node's security updates keep coming from Homebrew or nodejs.org. It finds Node
+  in your login shell's PATH, Homebrew, MacPorts, nvm, Volta, asdf, mise, nodenv
+  and fnm, and says how to install it if there is none. The papers it runs find
+  latexmk, git and latexdiff on your login shell's PATH plus `/Library/TeX/texbin`
+  and Homebrew's folders (an app opened from Finder gets none of these by itself).
+- **File → Open Folder…** (⌘O) adds a paper folder and opens it; **File → Open
+  Recent** lists the hub's papers. In Finder, **Open With → Margin** on a folder,
+  or dropping a folder on Margin's Dock icon, does the same.
+- **Window → Papers** (⇧⌘P), or clicking the Dock icon, brings the list back;
+  closing it doesn't quit. **View** has Reload (⌘R) and zoom (⌘+, ⌘−, ⌘0).
+  Links to other sites (doi.org, Crossref, this README) open in your browser.
+- **Quitting Margin** lets each editor save, then stops the hub and every paper it
+  started. If the app crashes or is force-quit, the hub notices (its stdin closes)
+  and stops too. If a hub was already running on port 4242 (`margin hub` in a
+  terminal), the app uses it and leaves it running when it quits.
+- If the hub cannot start (port 4242 taken by `margin <folder>`, for example) the
+  app says why. The hub's output is in `~/Library/Logs/Margin/hub.log`.
+- The first time you press **Claude terminal**, macOS asks whether Margin may
+  control Terminal. If you said no, allow it in System Settings → Privacy &
+  Security → Automation → Margin.
+
+The command line keeps working exactly as before, with or without the app.
+
+**Getting the app.** Either download it from GitHub: every push builds it (the
+*macOS app* workflow under the repository's **Actions** tab); open a run and
+download **Margin-app** under *Artifacts*, unzip until you have `Margin.app`
+(GitHub wraps the zip in another one), and move it to Applications. Or build it
+on your Mac, with Xcode or the Command Line Tools (`xcode-select --install`):
+
+```bash
+cd ~/Developer/margin
+mac/build-app.sh            # → mac/dist/Margin.app and mac/dist/Margin.zip
+mac/build-app.sh --universal   # Apple silicon and Intel in one app
+```
+
+The app holds a copy of Margin, so rebuild (or download) it after updating Margin.
+
+**Opening it the first time (Gatekeeper).** The app is signed "ad hoc", not with an
+Apple Developer certificate, so macOS refuses to open a downloaded copy at first
+("Apple could not verify “Margin” is free of malware"). On current macOS
+(Sequoia and later) right-click → Open is no longer enough:
+
+1. Double-click Margin.app and dismiss the warning (**Done**).
+2. Open System Settings → Privacy & Security, scroll to *Security*, and press
+   **Open Anyway** next to "Margin was blocked". Confirm with your password.
+3. Open Margin again and press **Open Anyway**. macOS remembers the choice.
+
+A copy you built yourself is not quarantined and opens directly. To skip the steps
+for a downloaded copy you trust (or if macOS calls it "damaged"), run
+`xattr -dr com.apple.quarantine /Applications/Margin.app`.
+Opening without warnings would take a membership of the Apple Developer Program, a
+*Developer ID Application* certificate to sign with (`codesign --options runtime
+--timestamp`, the hardened runtime, plus the `com.apple.security.automation.apple-events`
+entitlement so Claude terminal can still ask Terminal), and notarizing each build with Apple
+(`xcrun notarytool submit … --wait`, then `xcrun stapler staple Margin.app`); the
+build script and the CI workflow are where that would go.
+
+To remove the app: quit it and drop it in the Trash. It also leaves its log
+(`~/Library/Logs/Margin/`), its window positions (`defaults delete
+io.github.benjaminfigueiredo.margin`) and WebKit's data for it (folders named
+`io.github.benjaminfigueiredo.margin` in `~/Library/WebKit/` and `~/Library/Caches/`).
+
 ### What changed, and a diff PDF for resubmissions
 
 **Changes** in the top bar opens a panel over the PDF (the same place as Logs and Find):
@@ -369,14 +442,15 @@ Open Claude Code in the Margin folder (`cd ~/Developer/margin && claude`) and
 describe the change. `CLAUDE.md` in this repo tells Claude how the code is
 organised and the rules to follow. In particular, Claude runs `npm test` before
 committing, and rebuilds the UI when it changes `web/`. GitHub runs the same
-test on every push (`.github/workflows/test.yml`).
+test on every push (`.github/workflows/test.yml`), and builds and smoke-tests
+the Mac app on macOS (`.github/workflows/macos-app.yml`).
 
 To try a change on a paper before committing, stop and restart `margin`; it
 always runs the code in this folder.
 
 ## Uninstall
 
-Margin runs only while `margin` (or `margin hub`) is open in a terminal. It
+Margin runs only while `margin` (or `margin hub`, or the Mac app) is open. It
 installs no background service and nothing system-wide except the `margin`
 command. Its settings folder (the hub's list of papers, the shared appearance
 settings and the papers' logs) is `~/Library/Application Support/margin/` on macOS
@@ -437,6 +511,7 @@ templates/          CLAUDE.md, slash commands and the prompt hook installed by i
 web/                UI source (CodeMirror 6, pdf.js) and the hub page → built into public/
 test/run.mjs        end-to-end test (npm test)
 test/hub.mjs        end-to-end test of the hub (npm test)
+mac/                the Mac app: Swift shell (AppKit + WKWebView) around `margin hub`, build-app.sh
 CLAUDE.md           guide for Claude when working on Margin's code
 CHANGELOG.md        what changed in each version
 ```

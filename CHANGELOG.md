@@ -20,6 +20,13 @@
   Margin's settings folder (`~/Library/Application Support/margin` on macOS, `~/.config/margin`
   elsewhere, or `MARGIN_CONFIG_DIR`), never in a paper. Programs that start the hub can wait for
   the line `MARGIN_HUB_READY <url>` on stdout. `margin <folder>` and `margin init` are unchanged.
+- A Mac app (`mac/`, built with `mac/build-app.sh` or downloaded from the CI run's artifacts): the
+  hub in native windows, a window per paper, File → Open Folder… / Open Recent, Finder's Open With
+  and Dock drops for paper folders, JavaScript dialogs, downloads with a save panel, and the usual
+  Edit/View/Window menus. It uses the Node.js installed on the Mac (20 or later) and the login
+  shell's PATH plus TeX's and Homebrew's folders, starts `margin hub` (or uses one already
+  running) and stops it on quit, after letting the editors save. Ad-hoc signed: see README for
+  opening it past Gatekeeper. The command line is unchanged.
 - `margin hub --exit-with-stdin`: the hub (and its papers) also stop when stdin closes, so a
   program that starts the hub with a pipe on its stdin never leaves it running behind, even if
   that program crashes or is force-quit.

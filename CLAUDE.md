@@ -37,6 +37,9 @@ examples/           Sample paper used by the test
 test/run.mjs        End-to-end API test
 test/hub.mjs        End-to-end hub test (child processes, ports, .mcp.json, guards); `npm run test:api` runs both
 test/ui/            Playwright browser tests (npm test runs both)
+mac/                Mac app: Swift package (AppKit + WKWebView shell that starts `margin hub`), Info.plist,
+                    build-app.sh (→ mac/dist/Margin.app, .zip), check-app.sh, tools/make-icon.swift.
+                    Built and smoke-tested only on macOS CI (.github/workflows/macos-app.yml)
 ```
 
 ## Commands
@@ -86,6 +89,12 @@ The test needs latexmk, bibtex and synctex on PATH.
 - On macOS `localhost` may resolve to `::1`; the server listens on both, and
   `.mcp.json` uses `127.0.0.1`.
 - `bin/margin.js` must stay executable (git tracks the mode).
+- The Mac app bundles Margin's code with `npm ci --omit=dev --omit=optional` (no fsevents, no native
+  code in the bundle) and uses the Mac's own Node. A new runtime dependency must work from there:
+  `mac/check-app.sh` imports `server/hub.js` from the bundle.
+- WKWebView shows no `alert`/`confirm`/`prompt`, downloads nothing and opens no windows by itself:
+  `mac/Sources/Margin/BrowserWindow.swift` does. A UI change that relies on another browser feature
+  (a file `<input>`, `window.open`, a `download` link, a new ⌘ shortcut) must be checked there.
 - `res.sendFile` with an absolute path refuses any dot-folder in it (Margin itself may live in
   one, e.g. a `.claude/worktrees/` checkout): pass `{ root }` and a relative name.
 - Node's global HTTP agent keeps connections alive: a test that restarts a server on the same
