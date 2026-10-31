@@ -134,10 +134,7 @@ button, select, textarea, input { font: inherit; color: inherit; }
   display: flex; align-items: center; justify-content: space-between; padding: 0 10px 0 12px; gap: 16px;
 }
 .brand { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 14px; }
-.logo {
-  width: 24px; height: 24px; border-radius: 6px; background: var(--accent); color: white;
-  display: grid; place-items: center; font-weight: 700; font-size: 13px; letter-spacing: -.5px;
-}
+.logo { width: 24px; height: 24px; display: block; flex: none; } /* web/favicon.svg, the app icon */
 .project { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* Link back to the hub, shown only on a paper the hub started. */
 .hub-link { color: var(--top-ink); opacity: .75; text-decoration: none; font-size: 12px; white-space: nowrap; padding: 2px 7px; border: 1px solid rgba(255,255,255,.14); border-radius: 5px; }
@@ -588,7 +585,7 @@ body { grid-template-columns: minmax(0, 1fr); }
 :root[data-layout="split"] body { grid-template-rows: 34px 1fr 24px; }
 :root[data-layout="split"] .topbar { padding: 0 8px; gap: 10px; }
 :root[data-layout="split"] .brand { font-size: 13px; gap: 6px; }
-:root[data-layout="split"] .logo { width: 20px; height: 20px; font-size: 11px; border-radius: 5px; }
+:root[data-layout="split"] .logo { width: 20px; height: 20px; }
 :root[data-layout="split"] .top-actions { gap: 4px; }
 :root[data-layout="split"] .btn.top, :root[data-layout="split"] .btn.compile { padding: 3px 9px; }
 :root[data-layout="split"] .btn.compile.caret { padding: 3px 6px; }

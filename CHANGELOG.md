@@ -9,6 +9,9 @@ was not published as a release on its own.
 
 ### New
 
+- **A new icon, "Threshold"**: two piers and an arch over a threshold, in the Bauhaus primaries —
+  the margin as the space between. It is the Mac app's icon, the favicon and the logo in the top
+  bar (`web/favicon.svg`; the Mac icon is drawn from the same geometry).
 - **Citation-support checking.** A new tool, `get_cited_pdf`, finds the PDF of a cited paper so
   Claude can read it and judge whether it supports the sentence that cites it: first an attachment
   of the item in your Zotero (stored or linked files, My Library or a group; through Better BibTeX's
