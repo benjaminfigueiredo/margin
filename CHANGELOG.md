@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.3.1 — 2026-10-31
+
+Checks that the papers you cite say what you cite them for. Includes everything in 0.3.0, which
+was not published as a release on its own.
+
 ### New
 
 - **Citation-support checking.** A new tool, `get_cited_pdf`, finds the PDF of a cited paper so
