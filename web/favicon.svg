@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="100 100 824 824">
+  <!-- Margin's icon, "Threshold": two piers and an arch over a threshold. The Mac app's icon is
+       drawn from the same geometry (on the 1024 macOS grid) by mac/tools/make-icon.swift. -->
+  <defs><clipPath id="m"><rect x="100" y="100" width="824" height="824" rx="184"/></clipPath></defs>
+  <rect x="100" y="100" width="824" height="824" rx="184" fill="#F7F4EC"/>
+  <g clip-path="url(#m)">
+    <rect x="100" y="820" width="824" height="104" fill="#1F4E9E"/>
+    <rect x="250" y="380" width="150" height="440" fill="#141414"/>
+    <rect x="624" y="380" width="150" height="440" fill="#141414"/>
+    <path d="M250 380 A262 262 0 0 1 774 380 L624 380 A112 112 0 0 0 400 380 Z" fill="#D7362B"/>
+    <rect x="400" y="776" width="224" height="44" fill="#F2B01E"/>
+  </g>
+</svg>

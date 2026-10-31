@@ -1,6 +1,7 @@
 // Draws Margin's app icon into an .iconset folder (for iconutil), with CoreGraphics only, so the
-// icon is rebuilt identically on any Mac: the favicon of web/index.html (a green rounded square
-// with a white "M"), on the standard macOS icon grid (an 824 px square on a 1024 px canvas).
+// icon is rebuilt identically on any Mac. It is "Threshold", the same geometry as web/favicon.svg
+// (the favicon and the logo in the top bars): two piers and an arch over a threshold, on the
+// standard macOS icon grid (an 824 px rounded square on a 1024 px canvas). Change both together.
 //
 //   swift mac/tools/make-icon.swift <out.iconset>
 import CoreGraphics
@@ -15,31 +16,62 @@ guard args.count == 2 else {
 let out = URL(fileURLWithPath: args[1], isDirectory: true)
 try FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
 
+func rgb(_ hex: UInt32) -> CGColor {
+    CGColor(red: CGFloat((hex >> 16) & 0xff) / 255, green: CGFloat((hex >> 8) & 0xff) / 255,
+            blue: CGFloat(hex & 0xff) / 255, alpha: 1)
+}
+let paper = rgb(0xF7F4EC), ink = rgb(0x141414), red = rgb(0xD7362B), yellow = rgb(0xF2B01E), blue = rgb(0x1F4E9E)
+
+// A point on a circle, in the SVG's coordinates (y grows downwards; the context is flipped to match).
+func onCircle(_ cx: CGFloat, _ cy: CGFloat, _ r: CGFloat, _ angle: CGFloat) -> CGPoint {
+    CGPoint(x: cx + r * cos(angle), y: cy + r * sin(angle))
+}
+
 func render(_ px: Int) -> CGImage {
     let space = CGColorSpace(name: CGColorSpace.sRGB)!
     let ctx = CGContext(data: nil, width: px, height: px, bitsPerComponent: 8, bytesPerRow: 0, space: space,
                         bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
-    ctx.scaleBy(x: CGFloat(px) / 1024, y: CGFloat(px) / 1024)
     ctx.setShouldAntialias(true)
-    let inset: CGFloat = 100, side: CGFloat = 824
-    // The favicon's 32-unit grid (rx 7) scaled to the icon square.
-    let unit = side / 32
-    let square = CGRect(x: inset, y: inset, width: side, height: side)
-    ctx.addPath(CGPath(roundedRect: square, cornerWidth: 7 * unit, cornerHeight: 7 * unit, transform: nil))
-    ctx.setFillColor(CGColor(red: 0x2f / 255.0, green: 0x7a / 255.0, blue: 0x55 / 255.0, alpha: 1))
+    // Work in web/favicon.svg's units: a 1024 square with y growing downwards.
+    ctx.scaleBy(x: CGFloat(px) / 1024, y: CGFloat(px) / 1024)
+    ctx.translateBy(x: 0, y: 1024)
+    ctx.scaleBy(x: 1, y: -1)
+
+    let square = CGPath(roundedRect: CGRect(x: 100, y: 100, width: 824, height: 824),
+                        cornerWidth: 184, cornerHeight: 184, transform: nil)
+    ctx.addPath(square)
+    ctx.setFillColor(paper)
     ctx.fillPath()
-    // M: M9 23 V9 l7 9 7-9 v14 (SVG y grows downwards; CoreGraphics y grows upwards).
-    func p(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: inset + x * unit, y: inset + (32 - y) * unit) }
-    ctx.move(to: p(9, 23))
-    ctx.addLine(to: p(9, 9))
-    ctx.addLine(to: p(16, 18))
-    ctx.addLine(to: p(23, 9))
-    ctx.addLine(to: p(23, 23))
-    ctx.setStrokeColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
-    ctx.setLineWidth(2.6 * unit)
-    ctx.setLineJoin(.round)
-    ctx.setLineCap(.round)
-    ctx.strokePath()
+
+    ctx.saveGState()
+    ctx.addPath(square)
+    ctx.clip()
+    ctx.setFillColor(blue)
+    ctx.fill(CGRect(x: 100, y: 820, width: 824, height: 104)) // the ground
+    ctx.setFillColor(ink)
+    ctx.fill(CGRect(x: 250, y: 380, width: 150, height: 440)) // left pier
+    ctx.fill(CGRect(x: 624, y: 380, width: 150, height: 440)) // right pier
+    // The arch: the upper half of a ring centred on (512, 380), outer radius 262, inner 112. Drawn
+    // as fine polylines so no arc-direction convention can flip it in the flipped context: from the
+    // left (angle pi) over the top (3pi/2, i.e. y = 380 - r) to the right (2pi), then back inside.
+    let steps = 96
+    let arch = CGMutablePath()
+    for i in 0...steps {
+        let a = CGFloat.pi + CGFloat.pi * CGFloat(i) / CGFloat(steps)
+        let p = onCircle(512, 380, 262, a)
+        if i == 0 { arch.move(to: p) } else { arch.addLine(to: p) }
+    }
+    for i in 0...steps {
+        let a = 2 * CGFloat.pi - CGFloat.pi * CGFloat(i) / CGFloat(steps)
+        arch.addLine(to: onCircle(512, 380, 112, a))
+    }
+    arch.closeSubpath()
+    ctx.addPath(arch)
+    ctx.setFillColor(red)
+    ctx.fillPath()
+    ctx.setFillColor(yellow)
+    ctx.fill(CGRect(x: 400, y: 776, width: 224, height: 44)) // the threshold
+    ctx.restoreGState()
     return ctx.makeImage()!
 }
 

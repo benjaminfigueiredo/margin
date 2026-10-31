@@ -402,7 +402,7 @@ export async function startHub({
   const page = (req, res) => res.sendFile('hub.html', { root: PUBLIC });
   app.get('/', page);
   app.get('/open/:id', page);
-  for (const f of ['hub.js', 'hub.css', 'style.css']) app.get(`/${f}`, (req, res) => res.sendFile(f, { root: PUBLIC }));
+  for (const f of ['hub.js', 'hub.css', 'style.css', 'favicon.svg']) app.get(`/${f}`, (req, res) => res.sendFile(f, { root: PUBLIC }));
   app.use((req, res) => res.status(404).send('Not found'));
 
   const { server, server6 } = await listenLoopback(app, port);

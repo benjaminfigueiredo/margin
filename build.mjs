@@ -11,4 +11,5 @@ fs.copyFileSync('web/index.html', 'public/index.html');
 fs.copyFileSync('web/style.css', 'public/style.css');
 fs.copyFileSync('web/hub.html', 'public/hub.html');
 fs.copyFileSync('web/hub.css', 'public/hub.css');
+fs.copyFileSync('web/favicon.svg', 'public/favicon.svg');
 fs.copyFileSync('node_modules/pdfjs-dist/build/pdf.worker.min.mjs', 'public/pdf.worker.min.mjs');
