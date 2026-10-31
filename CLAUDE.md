@@ -29,7 +29,9 @@ server/search.js    Project-wide find and replace
 server/wordcount.js LaTeX word counter (also bundled into the browser)
 server/compile.js   latexmk invocation, TeX log parser, SyncTeX forward/inverse
 server/bib.js       BibTeX parser, citation checks, doi.org and Crossref lookups
-server/zotero.js    Zotero search/export via Better BibTeX JSON-RPC (local API fallback), port 23119
+server/zotero.js    Zotero search/export/attachment paths via Better BibTeX JSON-RPC (local API fallback), port 23119
+server/cited-pdf.js get_cited_pdf: a cited paper's PDF from Zotero or the context (<key>.pdf), validated and copied to
+                    .margin-build/cited/<key>.pdf so Claude Code can Read it without a prompt
 server/git.js       commit / pull --rebase / push for the Overleaf round-trip
 server/changes.js   Changes view: read-only `git diff` parsed into per-file hunks (since last sync / HEAD), accepted-since list
 server/latexdiff.js latexdiff --flatten between a git ref and the paper, compiled into .margin-build/diff/ (never over the real PDF)

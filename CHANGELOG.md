@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### New
+
+- **Citation-support checking.** A new tool, `get_cited_pdf`, finds the PDF of a cited paper so
+  Claude can read it and judge whether it supports the sentence that cites it: first an attachment
+  of the item in your Zotero (stored or linked files, My Library or a group; through Better BibTeX's
+  `item.attachments`, or Zotero's local API without it), then `<key>.pdf` in the paper's Context
+  view. Nothing is fetched from the internet. The PDF is copied to `.margin-build/cited/<key>.pdf`
+  (local only; refreshed when the original changes), so Claude Code reads it without a permission
+  prompt. Keys are validated, only real PDFs up to 100 MB are used, and links are never followed
+  in Margin's own folders.
+- A new slash command, `/check-citation-support`, goes through the citations in a section one at a
+  time, reads the relevant parts of each cited paper and leaves a comment where the paper only
+  partly supports the claim, does not support it, or could not be checked (no PDF). **Run
+  `margin init` again in each paper** (or "Update for Claude" in the Papers window) to get it.
+
 ## 0.3.0 — 2026-10-30
 
 A big release: a Mac app, several papers at once through the hub, notifications and a one-click

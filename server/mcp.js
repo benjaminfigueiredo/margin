@@ -5,6 +5,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { checkCitations, lookupDoi, addEntry, searchCrossref, parseBib, formatEntry, bibKeys } from './bib.js';
 import { searchZotero, exportFromZotero } from './zotero.js';
+import { findCitedPdfs, describeCitedPdfs, MAX_KEYS, CITED_FOLDER } from './cited-pdf.js';
 import { registerResponseTools, pointForEdit, respondsToSchema } from './responses-mcp.js';
 import { formatAsks } from './asks.js';
 import { registerContextTools, contextSummary } from './context-mcp.js';
@@ -289,6 +290,22 @@ export function buildMcpServer(ctx) {
     const entry = await exportFromZotero(key, library);
     const r = addEntry(project, entry, file);
     return text(`Added \\cite{${r.key}} to ${r.file}:\n\n${formatEntry(parseBib(entry)[0])}`);
+  }));
+
+  server.registerTool('get_cited_pdf', {
+    title: 'Get the PDF of a cited paper',
+    description: `Find the PDF of the paper behind a citation key, so you can check whether it supports the sentence that cites it. Looks, in this order, in the author's Zotero (an attachment of the item with that citation key, stored or linked, My Library or a group; Zotero must be open) and then in the paper's private context (a PDF named <key>.pdf in Margin's Context view). It never downloads anything. The PDF is copied to ${CITED_FOLDER}/<key>.pdf in the paper folder (local only, never committed or sent to Overleaf); the result gives that path, where the PDF came from, and the item's title, authors and year when known. Then read it yourself with your Read tool (use a pages range such as "1-5" for long PDFs, and read the abstract and the passage that matters rather than everything). Never invent page numbers or quotes. When no PDF is found the result says so and what the author can do (attach it in Zotero, or add <key>.pdf in the Context view). Accepts up to ${MAX_KEYS} keys per call. Keys must be BibTeX keys as used in \\cite{} (letters, digits and _ : . + - only).`,
+    inputSchema: {
+      key: z.string().optional().describe('One citation key, e.g. hobday2016'),
+      keys: z.array(z.string()).min(1).max(MAX_KEYS).optional().describe(`Several citation keys (at most ${MAX_KEYS})`),
+    },
+  }, wrap(async ({ key, keys }) => {
+    const list = [...(key ? [key] : []), ...(keys || [])];
+    if (!list.length) throw new Error('Give a citation key (key) or several (keys).');
+    const results = await findCitedPdfs({ project, context: ctx.context }, list);
+    const text_ = describeCitedPdfs(project, results);
+    if (!results.some((r) => r.ok)) throw new Error(text_);
+    return text(text_);
   }));
 
   registerResponseTools(server, { review, wrap, text });
